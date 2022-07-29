@@ -1,9 +1,14 @@
-import os
 import base64
-import time
+import os
+import platform
 import random
+import tempfile
+import time
 from multiprocessing import Pool
+from unittest import mock
 
+import pytest
+import wandb
 from wandb import wandb_sdk
 
 
@@ -118,3 +123,28 @@ def test_artifacts_cache_cleanup_tmp_files(runner):
         reclaimed_bytes = cache.cleanup(10000)
 
         assert reclaimed_bytes == 1000
+
+
+@pytest.mark.skipif(
+    platform.system() == "Windows", reason="backend crashes on Windows in CI"
+)
+def test_artifacts_cache_location_env_var(runner):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch.dict("os.environ", WANDB_CACHE_DIR=tmpdir):
+            with mock.patch("wandb.sdk.interface.artifacts._artifacts_cache", None):
+                cache = wandb_sdk.wandb_artifacts.get_artifacts_cache()
+                assert cache._cache_dir == os.path.join(tmpdir, "artifacts")
+
+
+@pytest.mark.skipif(
+    platform.system() == "Windows", reason="backend crashes on Windows in CI"
+)
+def test_artifacts_cache_location_init(runner, live_mock_server, test_settings):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with runner.isolated_filesystem():
+            new_tempdir = os.path.join(tmpdir, "new")
+            test_settings.update({"cache_dir": new_tempdir})
+            wandb.init(settings=test_settings)
+            with mock.patch("wandb.sdk.interface.artifacts._artifacts_cache", None):
+                cache = wandb_sdk.wandb_artifacts.get_artifacts_cache()
+                assert cache._cache_dir == os.path.join(new_tempdir, "artifacts")
