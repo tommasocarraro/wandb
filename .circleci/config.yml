@@ -782,6 +782,12 @@ jobs:
                 command: |
                   sed -i -e 's/WANDB_API_KEY_PLACEHOLDER/'"$WANDB_API_KEY"'/g' << parameters.path >>/<< parameters.pod_config_name >>
             - run:
+                name: "Propagate AWS credential environment variables to pod.yaml"
+                command: |
+                  sed -i -e 's/AWS_ACCESS_KEY_ID_PLACEHOLDER/'"$AWS_ACCESS_KEY_ID"'/g' << parameters.path >>/<< parameters.pod_config_name >>
+                  sed -i -e 's/AWS_DEFAULT_REGION_PLACEHOLDER/'"$AWS_DEFAULT_REGION"'/g' << parameters.path >>/<< parameters.pod_config_name >>
+                  sed -i -e 's/AWS_SECRET_ACCESS_KEY_PLACEHOLDER/'"$AWS_SECRET_ACCESS_KEY"'/g' << parameters.path >>/<< parameters.pod_config_name >>
+            - run:
                 name: "Spin up pod"
                 command: |
                   kubectl apply -f << parameters.path >>/<< parameters.pod_config_name >>
@@ -1055,7 +1061,9 @@ workflows:
           path: "./tests/standalone_tests/shards/gke_cpu"
           pod_name: "cpu-pod"
           image_name: << pipeline.parameters.container_registry >>/${GOOGLE_PROJECT_ID}/cpu-sdk:latest
-          context: slack-secrets
+          context:
+            - slack-secrets
+            - aws-wandb-testing-secrets
           notify_on_failure: true
           notify_on_success: true
       - cloud_test:
@@ -1066,7 +1074,9 @@ workflows:
           path: "./tests/standalone_tests/shards/gke_gpu"
           pod_name: "gpu-pod"
           image_name: << pipeline.parameters.container_registry >>/${GOOGLE_PROJECT_ID}/gpu-sdk:latest
-          context: slack-secrets
+          context:
+            - slack-secrets
+            - aws-wandb-testing-secrets
           notify_on_failure: true
           notify_on_success: true
       - slack_notify:
