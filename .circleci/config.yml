@@ -787,14 +787,9 @@ jobs:
             - run:
                 name: "Propagate AWS credential environment variables to pod.yaml"
                 command: |
-                  echo "DEBUG0: $AWS_DEFAULT_REGION"
                   sed -i -e 's^AWS_DEFAULT_REGION_PLACEHOLDER^'"$AWS_DEFAULT_REGION"'^g' << parameters.path >>/<< parameters.pod_config_name >>
-                  cat << parameters.path >>/<< parameters.pod_config_name >>
-                  echo "DEBUG0a"
                   sed -i -e 's^AWS_ACCESS_KEY_ID_PLACEHOLDER^'"$AWS_ACCESS_KEY_ID"'^g' << parameters.path >>/<< parameters.pod_config_name >>
-                  echo "DEBUG0b"
                   sed -i -e 's^AWS_SECRET_ACCESS_KEY_PLACEHOLDER^'"$AWS_SECRET_ACCESS_KEY"'^g' << parameters.path >>/<< parameters.pod_config_name >>
-                  echo "DEBUG0c"
             - run:
                 name: "Spin up pod"
                 command: |
