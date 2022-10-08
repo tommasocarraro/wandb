@@ -4,6 +4,9 @@ tag:
     - linux
     - mac
     - win
+depend:
+  requirements:
+    - imageio
 plugin:
   - wandb
 assert:
