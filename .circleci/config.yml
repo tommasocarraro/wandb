@@ -1122,7 +1122,7 @@ workflows:
           matrix:
             parameters:
               python_version_major: [3]
-              python_version_minor: [8]
+              python_version_minor: [9]
               shard:
                 - "base"
           name: "func-s_<<matrix.shard>>-lin-py<<matrix.python_version_major>><<matrix.python_version_minor>>"
@@ -1135,7 +1135,7 @@ workflows:
           matrix:
             parameters:
               python_version_major: [3]
-              python_version_minor: [8]
+              python_version_minor: [9]
               shard:
                 - "sklearn"
                 - "metaflow"
