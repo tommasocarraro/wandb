@@ -165,11 +165,11 @@ class Artifact(ArtifactInterface):
         incremental: Optional[bool] = None,
         use_as: Optional[str] = None,
     ) -> None:
-        if not re.match(r"^[a-zA-Z0-9_\-.]+$", name):
-            raise ValueError(
-                "Artifact name may only contain alphanumeric characters, dashes, underscores, and dots. "
-                'Invalid name: "%s"' % name
-            )
+#         if not re.match(r"^[a-zA-Z0-9_\-.]+$", name):
+#             raise ValueError(
+#                 "Artifact name may only contain alphanumeric characters, dashes, underscores, and dots. "
+#                 'Invalid name: "%s"' % name
+#             )
         metadata = _normalize_metadata(metadata)
         # TODO: this shouldn't be a property of the artifact. It's a more like an
         # argument to log_artifact.
