@@ -2,8 +2,10 @@
     Implementation of isValidJSValue from graphql.s
 """
 
-from collections.abc import Iterable, Mapping
+from six.moves.collections_abc import Iterable, Mapping
 import json
+
+from six import string_types
 
 from ..type import (GraphQLEnumType, GraphQLInputObjectType, GraphQLList,
                     GraphQLNonNull, GraphQLScalarType)
@@ -25,7 +27,7 @@ def is_valid_value(value, type):
 
     if isinstance(type, GraphQLList):
         item_type = type.of_type
-        if not isinstance(value, str) and isinstance(value, Iterable):
+        if not isinstance(value, string_types) and isinstance(value, Iterable):
             errors = []
             for i, item in enumerate(value):
                 item_errors = is_valid_value(item, item_type)

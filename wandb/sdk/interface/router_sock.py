@@ -4,11 +4,11 @@ Router to manage responses from a socket client.
 
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
+from typing import TYPE_CHECKING
 
-from ..lib.mailbox import Mailbox
-from ..lib.sock_client import SockClient, SockClientClosedError
 from .router import MessageRouter, MessageRouterClosedError
+from ..lib.sock_client import SockClient, SockClientClosedError
 
 if TYPE_CHECKING:
     from wandb.proto import wandb_internal_pb2 as pb
@@ -16,13 +16,12 @@ if TYPE_CHECKING:
 
 class MessageSockRouter(MessageRouter):
     _sock_client: SockClient
-    _mailbox: Mailbox
 
-    def __init__(self, sock_client: SockClient, mailbox: Mailbox) -> None:
+    def __init__(self, sock_client: SockClient) -> None:
         self._sock_client = sock_client
-        super().__init__(mailbox=mailbox)
+        super().__init__()
 
-    def _read_message(self) -> Optional["pb.Result"]:
+    def _read_message(self) -> "Optional[pb.Result]":
         try:
             resp = self._sock_client.read_server_response(timeout=1)
         except SockClientClosedError:

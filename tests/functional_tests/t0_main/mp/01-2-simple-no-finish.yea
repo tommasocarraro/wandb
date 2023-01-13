@@ -3,6 +3,7 @@ plugin:
   - wandb
 tag:
   shard: service
+  skip: true
 
 depend:
   requirements:

@@ -1,5 +1,4 @@
 import math
-import pathlib
 import random
 import sys
 
@@ -8,7 +7,7 @@ import wandb
 
 def main(argv):
     # wandb.init(entity="wandb", project="new-plots-test-5")
-    wandb.init(name=pathlib.Path(__file__).stem)
+    wandb.init(name=__file__)
     data = [[i, random.random() + math.sin(i / 10)] for i in range(100)]
     table = wandb.Table(data=data, columns=["step", "height"])
     line_plot = wandb.plot.line(

@@ -1,8 +1,8 @@
 import sys
-from collections.abc import Iterable
+from six.moves.collections_abc import Iterable
 from functools import partial
 
-from wandb_promise import Promise, is_thenable
+from promise import Promise, is_thenable
 
 from ...error import GraphQLError, GraphQLLocatedError
 from ...type import (GraphQLEnumType, GraphQLInterfaceType, GraphQLList,

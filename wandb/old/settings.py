@@ -1,10 +1,10 @@
-import configparser
 import os
-from typing import Any, Optional
 
-from wandb import env
+import configparser
+
+from wandb import util
 from wandb.old import core
-from wandb.sdk.lib import filesystem
+from wandb import env
 
 
 class Settings:
@@ -14,9 +14,7 @@ class Settings:
 
     _UNSET = object()
 
-    def __init__(
-        self, load_settings: bool = True, root_dir: Optional[str] = None
-    ) -> None:
+    def __init__(self, load_settings=True, root_dir=None):
         self._global_settings = Settings._settings()
         self._local_settings = Settings._settings()
         self.root_dir = root_dir
@@ -27,7 +25,7 @@ class Settings:
             if os.path.isdir(core.wandb_dir(self.root_dir)):
                 self._local_settings.read([Settings._local_path(self.root_dir)])
 
-    def get(self, section: str, key: str, fallback: Any = _UNSET) -> Any:
+    def get(self, section, key, fallback=_UNSET):
         # Try the local settings first. If we can't find the key, then try the global settings.
         # If a fallback is provided, return it if we can't find the key in either the local or global
         # settings.
@@ -42,7 +40,7 @@ class Settings:
                 else:
                     raise
 
-    def set(self, section, key, value, globally=False, persist=False) -> None:
+    def set(self, section, key, value, globally=False, persist=False):
         """Persists settings to disk if persist = True"""
 
         def write_setting(settings, settings_path, persist):
@@ -60,7 +58,7 @@ class Settings:
                 self._local_settings, Settings._local_path(self.root_dir), persist
             )
 
-    def clear(self, section, key, globally=False, persist=False) -> None:
+    def clear(self, section, key, globally=False, persist=False):
         def clear_setting(settings, settings_path, persist):
             settings.remove_option(section, key)
             if persist:
@@ -109,10 +107,10 @@ class Settings:
         config_dir = os.environ.get(
             env.CONFIG_DIR, os.path.join(os.path.expanduser("~"), ".config", "wandb")
         )
-        filesystem.mkdir_exists_ok(config_dir)
+        util.mkdir_exists_ok(config_dir)
         return os.path.join(config_dir, "settings")
 
     @staticmethod
     def _local_path(root_dir=None):
-        filesystem.mkdir_exists_ok(core.wandb_dir(root_dir))
+        util.mkdir_exists_ok(core.wandb_dir(root_dir))
         return os.path.join(core.wandb_dir(root_dir), "settings")

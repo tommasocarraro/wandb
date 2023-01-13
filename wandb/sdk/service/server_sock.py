@@ -2,19 +2,20 @@ import queue
 import socket
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING
 
 from wandb.proto import wandb_server_pb2 as spb
 
+from .service_base import _pbmap_apply_dict
+from .streams import StreamMux
 from ..lib import tracelog
 from ..lib.proto_util import settings_dict_from_pbmap
 from ..lib.sock_client import SockClient, SockClientClosedError
-from .service_base import _pbmap_apply_dict
-from .streams import StreamMux
+
 
 if TYPE_CHECKING:
     from threading import Event
-
     from ..interface.interface_relay import InterfaceRelay
 
 
@@ -104,11 +105,11 @@ class SockServerReadThread(threading.Thread):
                 break
             assert sreq, "read_server_request should never timeout"
             sreq_type = sreq.WhichOneof("server_request_type")
-            shandler_str = "server_" + sreq_type  # type: ignore
-            shandler: "Callable[[spb.ServerRequest], None]" = getattr(  # type: ignore
+            shandler_str = "server_" + sreq_type
+            shandler: "Callable[[spb.ServerRequest], None]" = getattr(
                 self, shandler_str, None
             )
-            assert shandler, f"unknown handle: {shandler_str}"  # type: ignore
+            assert shandler, f"unknown handle: {shandler_str}"
             shandler(sreq)
 
     def stop(self) -> None:
@@ -139,7 +140,6 @@ class SockServerReadThread(threading.Thread):
         stream_id = request._info.stream_id
         settings = settings_dict_from_pbmap(request._settings_map)
         self._mux.update_stream(stream_id, settings=settings)
-        self._mux.start_stream(stream_id)
 
     def server_inform_attach(self, sreq: "spb.ServerRequest") -> None:
         request = sreq.inform_attach
@@ -168,8 +168,6 @@ class SockServerReadThread(threading.Thread):
 
     def server_record_publish(self, sreq: "spb.ServerRequest") -> None:
         record = sreq.record_publish
-        # encode relay information so the right socket picks up the data
-        record.control.relay_id = self._sock_client._sockid
         stream_id = record._info.stream_id
         iface = self._mux.get_stream(stream_id).interface
         assert iface.record_q

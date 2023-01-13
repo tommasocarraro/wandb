@@ -4,7 +4,7 @@
 lightning-flash
 openmim # handles dependencies for mmlab projects
 mmcv
-mmdet>=2.26.0
+mmdet
 # mmf
 monai
 # nemo_toolkit[all]

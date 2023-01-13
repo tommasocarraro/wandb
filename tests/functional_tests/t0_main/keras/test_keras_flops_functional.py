@@ -3,6 +3,7 @@ import tensorflow as tf
 import wandb
 from wandb.keras import WandbCallback
 
+
 np.random.seed(42)
 x = np.random.randint(255, size=(100, 28, 28, 1))
 y = np.random.randint(10, size=(100,))
@@ -26,4 +27,4 @@ def get_functional_model():
 
 
 model = get_functional_model()
-_ = model.fit(x, y, epochs=2, callbacks=[WandbCallback(compute_flops=True)])
+_ = model.fit(x, y, epochs=2, callbacks=[WandbCallback()])

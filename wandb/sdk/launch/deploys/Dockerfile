@@ -1,5 +1,4 @@
 FROM python:3.9-slim-bullseye
-LABEL maintainer='Weights & Biases <support@wandb.com>'
 
 # install git
 RUN apt-get update && apt-get upgrade -y \

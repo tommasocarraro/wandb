@@ -75,6 +75,7 @@ apiVersion: v1
 data:
   launch-config.yaml: |
     base_url: https://api.wandb.ai # TODO: SET YOUR WANDB BASE URL
+    project: launch-welcome # TODO: SET YOUR ML PROJECT
     max_jobs: -1 # TODO: SET YOUR MAX CONCURRENT JOBS HERE
     registry:
       url: # TODO: SET ECR REPOSITORY URL HERE
@@ -89,9 +90,6 @@ data:
         secret-name: aws-secret
         secret-mount-path: /root/.aws/
       build-context-store: wandb-build # name here
-    runner:
-      type: kubernetes
-      namespace: wandb # TODO: set namespace here
 
 kind: ConfigMap
 metadata:

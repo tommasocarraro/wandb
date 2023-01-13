@@ -2,23 +2,23 @@
 disabled mode test.
 """
 
-import os
-import pickle
+import pytest  # type: ignore
 from unittest import mock
 
-import pytest  # type: ignore
 import wandb
+import pickle
+import os
 
 
-def test_disabled_noop(wandb_init):
+def test_disabled_noop(test_settings):
     """Make sure that all objects are dummy objects in noop case."""
-    run = wandb_init(mode="disabled")
+    run = wandb.init(mode="disabled", settings=test_settings)
     run.log(dict(this=2))
     run.finish()
 
 
-def test_disabled_ops(wandb_init):
-    run = wandb_init(mode="disabled")
+def test_disabled_ops(test_settings):
+    run = wandb.init(mode="disabled", settings=test_settings)
     print(len(run))
     print(abs(run))
     print(~run)
@@ -70,16 +70,16 @@ def test_disabled_ops(wandb_init):
     print(bool(run))
 
 
-def test_disabled_dir(wandb_init):
+def test_disabled_dir(test_settings):
     wandb.setup()  # need to do it before we mock tempfile.gettempdir (for service)
     tmp_dir = "/tmp/dir"
     with mock.patch("tempfile.gettempdir", lambda: tmp_dir):
-        run = wandb_init(mode="disabled")
+        run = wandb.init(mode="disabled", settings=test_settings)
     assert run.dir == tmp_dir
 
 
-def test_disabled_summary(wandb_init):
-    run = wandb_init(mode="disabled")
+def test_disabled_summary(test_settings):
+    run = wandb.init(mode="disabled", settings=test_settings)
     run.summary["cat"] = 2
     run.summary["nested"] = dict(level=3)
     print(run.summary["cat"])
@@ -99,9 +99,11 @@ def test_disabled_can_pickle():
     os.remove("test.pkl")
 
 
-def test_disabled_globals(wandb_init):
+def test_disabled_globals(test_settings):
     # Test wandb.* attributes
-    run = wandb_init(config={"foo": {"bar": {"x": "y"}}}, mode="disabled")
+    run = wandb.init(
+        config={"foo": {"bar": {"x": "y"}}}, mode="disabled", settings=test_settings
+    )
     wandb.log({"x": {"y": "z"}})
     wandb.log({"foo": {"bar": {"x": "y"}}})
     assert wandb.run == run
@@ -115,16 +117,30 @@ def test_disabled_globals(wandb_init):
     run.finish()
 
 
-def test_bad_url(wandb_init):
-    run = wandb_init(
-        settings=dict(mode="disabled", base_url="http://my-localhost:9000")
+def test_bad_url(test_settings):
+    test_settings.update(
+        mode="disabled",
+        base_url="http://localhost:9000",
+        source=wandb.sdk.wandb_settings.Source.INIT,
     )
+    run = wandb.init(settings=test_settings)
     run.log({"acc": 0.9})
     run.finish()
 
 
-def test_no_dirs(wandb_init):
-    run = wandb_init(settings={"mode": "disabled"})
-    run.log({"acc": 0.9})
-    run.finish()
-    assert not os.path.isdir("wandb")
+def test_login(test_settings):
+    test_settings.update(mode="disabled", source=wandb.sdk.wandb_settings.Source.INIT)
+    wandb.setup(settings=test_settings)
+    wandb.login()
+    wandb.finish()
+
+
+def test_no_dirs(test_settings, runner):
+    with runner.isolated_filesystem():
+        test_settings.update(
+            mode="disabled", source=wandb.sdk.wandb_settings.Source.INIT
+        )
+        run = wandb.init(settings=test_settings)
+        run.log({"acc": 0.9})
+        run.finish()
+        assert not os.path.isdir("wandb")

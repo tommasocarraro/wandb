@@ -1,5 +1,5 @@
-import torch
 from pytorch_lightning import LightningModule
+import torch
 from torch.utils.data import Dataset
 
 

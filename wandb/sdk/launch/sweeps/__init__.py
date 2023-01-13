@@ -1,13 +1,8 @@
 import logging
 from typing import Any, Callable, Dict
 
+
 log = logging.getLogger(__name__)
-
-
-class SchedulerError(Exception):
-    """Raised when a known error occurs with wandb sweep scheduler"""
-
-    pass
 
 
 def _import_sweep_scheduler() -> Any:
@@ -25,7 +20,7 @@ def load_scheduler(scheduler_name: str) -> Any:
 
     scheduler_name = scheduler_name.lower()
     if scheduler_name not in _WANDB_SCHEDULERS:
-        raise SchedulerError(
+        raise ValueError(
             f"The `scheduler_name` argument must be one of "
             f"{list(_WANDB_SCHEDULERS.keys())}, got: {scheduler_name}"
         )

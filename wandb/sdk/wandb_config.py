@@ -3,17 +3,18 @@ config.
 """
 
 import logging
-from typing import Optional
 
 import wandb
 from wandb.util import (
-    _is_artifact_representation,
+    _is_artifact,
+    _is_artifact_string,
     check_dict_contains_nested_artifact,
     json_friendly_val,
 )
 
 from . import wandb_helper
 from .lib import config_util
+
 
 logger = logging.getLogger("wandb")
 
@@ -40,7 +41,7 @@ class Config:
 
     Examples:
         Basic usage
-        ```
+        ```python
         wandb.config.epochs = 4
         wandb.init()
         for x in range(wandb.config.epochs):
@@ -48,14 +49,14 @@ class Config:
         ```
 
         Using wandb.init to set config
-        ```
+        ```python
         wandb.init(config={"epochs": 4, "batch_size": 32})
         for x in range(wandb.config.epochs):
             # train
         ```
 
         Nested configs
-        ```
+        ```python
         wandb.config['train']['epochs'] = 4
         wandb.init()
         for x in range(wandb.config['train']['epochs']):
@@ -63,7 +64,7 @@ class Config:
         ```
 
         Using absl flags
-        ```
+        ```python
         flags.DEFINE_string(‘model’, None, ‘model to run’) # name, default, help
         wandb.config.update(flags.FLAGS) # adds all absl flags to config
         ```
@@ -74,14 +75,8 @@ class Config:
         wandb.config.epochs = 4
 
         parser = argparse.ArgumentParser()
-        parser.add_argument(
-            "-b",
-            "--batch-size",
-            type=int,
-            default=8,
-            metavar="N",
-            help="input batch size for training (default: 8)",
-        )
+        parser.add_argument('-b', '--batch-size', type=int, default=8, metavar='N',
+                            help='input batch size for training (default: 8)')
         args = parser.parse_args()
         wandb.config.update(args)
         ```
@@ -89,8 +84,8 @@ class Config:
         Using TensorFlow flags (deprecated in tensorflow v2)
         ```python
         flags = tf.app.flags
-        flags.DEFINE_string("data_dir", "/tmp/data")
-        flags.DEFINE_integer("batch_size", 128, "Batch size.")
+        flags.DEFINE_string('data_dir', '/tmp/data')
+        flags.DEFINE_integer('batch_size', 128, 'Batch size.')
         wandb.config.update(flags.FLAGS)  # adds all of the tensorflow flags to config
         ```
     """
@@ -162,12 +157,7 @@ class Config:
     __setattr__ = __setitem__
 
     def __getattr__(self, key):
-        try:
-            return self.__getitem__(key)
-        except KeyError as ke:
-            raise AttributeError(
-                f"'{self.__class__}' object has no attribute '{key}'"
-            ) from ke
+        return self.__getitem__(key)
 
     def __contains__(self, key):
         return key in self._items
@@ -231,7 +221,7 @@ class Config:
         self,
         config_dict,
         allow_val_change=None,
-        ignore_keys: Optional[set] = None,
+        ignore_keys: set = None,
     ):
         sanitized = {}
         self._raise_value_error_on_nested_artifact(config_dict)
@@ -243,16 +233,12 @@ class Config:
         return sanitized
 
     def _sanitize(self, key, val, allow_val_change=None):
-        # TODO: enable WBValues in the config in the future
-        # refuse all WBValues which is all Media and Histograms
-        if isinstance(val, wandb.sdk.data_types.base_types.wb_value.WBValue):
-            raise ValueError("WBValue objects cannot be added to the run config")
         # Let jupyter change config freely by default
         if self._settings and self._settings._jupyter and allow_val_change is None:
             allow_val_change = True
         # We always normalize keys by stripping '-'
         key = key.strip("-")
-        if _is_artifact_representation(val):
+        if _is_artifact_string(val) or _is_artifact(val):
             val = self._artifact_callback(key, val)
         # if the user inserts an artifact into the config
         if not (

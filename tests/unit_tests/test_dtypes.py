@@ -1,25 +1,17 @@
-import datetime
-
-import numpy as np
-import pytest
 import wandb
 from wandb import data_types
-from wandb.sdk.data_types._dtypes import (
-    AnyType,
-    BooleanType,
-    ConstType,
-    InvalidType,
-    ListType,
-    NoneType,
-    NumberType,
-    OptionalType,
-    StringType,
-    TimestampType,
-    TypedDictType,
-    TypeRegistry,
-    UnionType,
-    UnknownType,
-)
+import numpy as np
+import pytest
+import os
+import datetime
+
+from wandb.sdk.data_types._dtypes import *
+from ..utils import assets_path
+
+
+class_labels = {1: "tree", 2: "car", 3: "road"}
+test_folder = os.path.dirname(os.path.realpath(__file__))
+im_path = assets_path("test.png")
 
 
 def test_none_type():
@@ -42,18 +34,28 @@ def test_number_type():
     assert TypeRegistry.type_of(1.2).assign("hi") == InvalidType()
 
 
-def test_timestamp_type():
-    datetime_obj = datetime.datetime(2000, 12, 1)
-    date_obj = datetime.date(2000, 12, 1)
-    datetime64_obj = np.datetime64("2000-12-01")
+def make_datetime():
+    return datetime.datetime(2000, 12, 1)
 
-    assert TypeRegistry.type_of(datetime_obj) == TimestampType()
+
+def make_date():
+    return datetime.date(2000, 12, 1)
+
+
+def make_datetime64():
+    return np.datetime64("2000-12-01")
+
+
+def test_timestamp_type():
+    assert TypeRegistry.type_of(make_datetime()) == TimestampType()
     assert (
-        TypeRegistry.type_of(datetime_obj).assign(date_obj).assign(datetime64_obj)
+        TypeRegistry.type_of(make_datetime())
+        .assign(make_date())
+        .assign(make_datetime64())
         == TimestampType()
     )
-    assert TypeRegistry.type_of(datetime_obj).assign(None) == InvalidType()
-    assert TypeRegistry.type_of(datetime_obj).assign(1) == InvalidType()
+    assert TypeRegistry.type_of(make_datetime()).assign(None) == InvalidType()
+    assert TypeRegistry.type_of(make_datetime()).assign(1) == InvalidType()
 
 
 def test_boolean_type():
@@ -269,12 +271,10 @@ def test_nested_dict():
     assert notation_type.assign(example) == real_type
 
 
-def test_image_type(assets_path):
-    class_labels = {1: "tree", 2: "car", 3: "road"}
+def test_image_type():
     wb_type = data_types._ImageFileType()
     image_simple = data_types.Image(np.random.rand(10, 10))
     wb_type_simple = data_types._ImageFileType.from_obj(image_simple)
-    im_path = assets_path("test.png")
     image_annotated = data_types.Image(
         np.random.rand(10, 10),
         boxes={
@@ -505,11 +505,11 @@ def test_tables_with_dicts():
         ],
     ]
 
-    _ = wandb.Table(columns=["A"], data=good_data, allow_mixed_types=True)
-    _ = wandb.Table(columns=["A"], data=bad_data, allow_mixed_types=True)
-    _ = wandb.Table(columns=["A"], data=good_data)
+    table = wandb.Table(columns=["A"], data=good_data, allow_mixed_types=True)
+    table = wandb.Table(columns=["A"], data=bad_data, allow_mixed_types=True)
+    table = wandb.Table(columns=["A"], data=good_data)
     with pytest.raises(TypeError):
-        _ = wandb.Table(columns=["A"], data=bad_data)
+        table = wandb.Table(columns=["A"], data=bad_data)
 
 
 def test_table_explicit_types():
@@ -538,6 +538,7 @@ def test_table_explicit_types():
 
 
 def test_table_type_cast():
+
     table = wandb.Table(columns=["type_col"])
     table.add_data(1)
 
@@ -556,47 +557,50 @@ def test_table_type_cast():
         table.add_data(4)
 
 
-def test_table_specials(assets_path):
-    class_labels = {1: "tree", 2: "car", 3: "road"}
-    im_path = assets_path("test.png")
-
-    box_annotation = {
-        "box_predictions": {
-            "box_data": [
-                {
-                    "position": {"minX": 0.1, "maxX": 0.2, "minY": 0.3, "maxY": 0.4},
-                    "class_id": 1,
-                    "box_caption": "minMax(pixel)",
-                    "scores": {"acc": 0.1, "loss": 1.2},
+box_annotation = {
+    "box_predictions": {
+        "box_data": [
+            {
+                "position": {
+                    "minX": 0.1,
+                    "maxX": 0.2,
+                    "minY": 0.3,
+                    "maxY": 0.4,
                 },
-            ],
-            "class_labels": class_labels,
-        },
-        "box_ground_truth": {
-            "box_data": [
-                {
-                    "position": {
-                        "minX": 0.1,
-                        "maxX": 0.2,
-                        "minY": 0.3,
-                        "maxY": 0.4,
-                    },
-                    "class_id": 1,
-                    "box_caption": "minMax(pixel)",
-                    "scores": {"acc": 0.1, "loss": 1.2},
+                "class_id": 1,
+                "box_caption": "minMax(pixel)",
+                "scores": {"acc": 0.1, "loss": 1.2},
+            },
+        ],
+        "class_labels": class_labels,
+    },
+    "box_ground_truth": {
+        "box_data": [
+            {
+                "position": {
+                    "minX": 0.1,
+                    "maxX": 0.2,
+                    "minY": 0.3,
+                    "maxY": 0.4,
                 },
-            ],
-            "class_labels": class_labels,
-        },
-    }
-    mask_annotation = {
-        "mask_predictions": {
-            "mask_data": np.random.randint(0, 4, size=(30, 30)),
-            "class_labels": class_labels,
-        },
-        "mask_ground_truth": {"path": im_path, "class_labels": class_labels},
-    }
+                "class_id": 1,
+                "box_caption": "minMax(pixel)",
+                "scores": {"acc": 0.1, "loss": 1.2},
+            },
+        ],
+        "class_labels": class_labels,
+    },
+}
+mask_annotation = {
+    "mask_predictions": {
+        "mask_data": np.random.randint(0, 4, size=(30, 30)),
+        "class_labels": class_labels,
+    },
+    "mask_ground_truth": {"path": im_path, "class_labels": class_labels},
+}
 
+
+def test_table_specials():
     table = wandb.Table(
         columns=["image", "table"],
         optional=False,
@@ -763,6 +767,7 @@ def test_table_typing_pandas():
     import pandas as pd
 
     # TODO: Pandas https://pandas.pydata.org/pandas-docs/stable/user_guide/basics.html#basics-dtypes
+
     # Numerics
     table = wandb.Table(dataframe=pd.DataFrame([[1], [0]]).astype(np.byte))
     table.add_data(1)
@@ -883,29 +888,3 @@ def test_artifact_type():
     assert type_of_artifact_dict.assign(artifact_string) == target_type
     assert type_of_artifact_string.assign(artifact_config_shape) == target_type
     assert type_of_artifact_string.assign(artifact) == target_type
-
-    # test nested
-    nested_artifact = {"nested_artifact": artifact}
-    type_of_nested_artifact = TypeRegistry.type_of(nested_artifact)
-    nested_artifact_string = {"nested_artifact": artifact_string}
-    type_of_nested_artifact_string = TypeRegistry.type_of(nested_artifact_string)
-    nested_artifact_config_dict = {"nested_artifact": artifact_config_shape}
-    type_of_nested_artifact_dict = TypeRegistry.type_of(nested_artifact_config_dict)
-    nested_target_type = TypedDictType(
-        {"nested_artifact": TypeRegistry.types_by_name().get("artifactVersion")()}
-    )
-    assert type_of_nested_artifact.assign(nested_artifact_string) == nested_target_type
-    assert (
-        type_of_nested_artifact_dict.assign(nested_artifact_config_dict)
-        == nested_target_type
-    )
-    assert type_of_nested_artifact_dict.assign(nested_artifact) == nested_target_type
-    assert (
-        type_of_nested_artifact_dict.assign(nested_artifact_string)
-        == nested_target_type
-    )
-    assert (
-        type_of_nested_artifact_string.assign(nested_artifact_config_dict)
-        == nested_target_type
-    )
-    assert type_of_nested_artifact_string.assign(nested_artifact) == nested_target_type

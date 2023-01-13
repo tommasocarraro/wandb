@@ -1,48 +1,85 @@
+import base64
+import binascii
+import codecs
 import contextlib
 import hashlib
 import os
 import random
-import tempfile
-from dataclasses import dataclass, field
 from typing import (
-    IO,
-    TYPE_CHECKING,
-    ContextManager,
+    Callable,
     Dict,
     List,
     Optional,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
 import wandb
-from wandb import env, util
+from wandb import env
+from wandb import util
 from wandb.data_types import WBValue
-from wandb.sdk.lib import filesystem
-from wandb.sdk.lib.hashutil import B64MD5, ETag, b64_to_hex_id
 
 if TYPE_CHECKING:
     # need this import for type annotations, but want to avoid circular dependency
-    import sys
-
-    import wandb.apis.public
-    from wandb.filesync.step_prepare import StepPrepare
     from wandb.sdk import wandb_artifacts
     from wandb.sdk.internal import progress
 
-    if sys.version_info >= (3, 8):
-        from typing import Protocol
-    else:
-        from typing_extensions import Protocol
 
-    class Opener(Protocol):
-        def __call__(self, mode: str = ...) -> ContextManager[IO]:
-            pass
+if TYPE_CHECKING:
+    import wandb.filesync.step_prepare.StepPrepare as StepPrepare  # type: ignore
+
+
+def md5_string(string: str) -> str:
+    hash_md5 = hashlib.md5()
+    hash_md5.update(string.encode())
+    return base64.b64encode(hash_md5.digest()).decode("ascii")
+
+
+def b64_string_to_hex(string):
+    return binascii.hexlify(base64.standard_b64decode(string)).decode("ascii")
+
+
+def md5_hash_file(path):
+    hash_md5 = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(64 * 1024), b""):
+            hash_md5.update(chunk)
+    return hash_md5
+
+
+def md5_hash_files(paths: List[str]):
+    hash_md5 = hashlib.md5()
+    # Create a mutable copy to sort
+    paths = [path for path in paths]
+    paths.sort()
+    for path in paths:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b""):
+                hash_md5.update(chunk)
+    return hash_md5
+
+
+def md5_file_b64(path: str) -> str:
+    return base64.b64encode(md5_hash_file(path).digest()).decode("ascii")
+
+
+def md5_files_b64(paths: List[str]) -> str:
+    return base64.b64encode(md5_hash_files(paths).digest()).decode("ascii")
+
+
+def md5_file_hex(path: str) -> str:
+    return md5_hash_file(path).hexdigest()
+
+
+def bytes_to_hex(bytestr):
+    # Works in python2 / python3
+    return codecs.getencoder("hex")(bytestr)[0]
 
 
 class ArtifactManifest:
-    entries: Dict[str, "ArtifactManifestEntry"]
+    entries: Dict[str, "ArtifactEntry"]
 
     @classmethod
     # TODO: we don't need artifact here.
@@ -70,10 +107,10 @@ class ArtifactManifest:
         self.entries = entries or {}
 
     def to_manifest_json(self):
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def digest(self):
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def add_entry(self, entry):
         if (
@@ -83,7 +120,7 @@ class ArtifactManifest:
             raise ValueError("Cannot add the same path twice: %s" % entry.path)
         self.entries[entry.path] = entry
 
-    def get_entry_by_path(self, path: str) -> Optional["ArtifactManifestEntry"]:
+    def get_entry_by_path(self, path: str) -> Optional["ArtifactEntry"]:
         return self.entries.get(path)
 
     def get_entries_in_directory(self, directory):
@@ -96,22 +133,14 @@ class ArtifactManifest:
         ]
 
 
-@dataclass
-class ArtifactManifestEntry:
-    path: util.LogicalFilePathStr
-    digest: Union[B64MD5, util.URIStr, util.FilePathStr, ETag]
-    ref: Optional[Union[util.FilePathStr, util.URIStr]] = None
-    birth_artifact_id: Optional[str] = None
-    size: Optional[int] = None
-    extra: Dict = field(default_factory=dict)
-    local_path: Optional[str] = None
-
-    def __post_init__(self):
-        self.path = util.to_forward_slash_path(self.path)
-        if self.extra is None:
-            self.extra = {}
-        if self.local_path and self.size is None:
-            raise ValueError("size required when local_path specified")
+class ArtifactEntry:
+    path: str
+    ref: Optional[str]
+    digest: str
+    birth_artifact_id: Optional[str]
+    size: Optional[int]
+    extra: Dict
+    local_path: Optional[str]
 
     def parent_artifact(self) -> "Artifact":
         """
@@ -122,7 +151,7 @@ class ArtifactManifestEntry:
         """
         raise NotImplementedError
 
-    def download(self, root: Optional[str] = None) -> util.FilePathStr:
+    def download(self, root: Optional[str] = None) -> str:
         """
         Downloads this artifact entry to the specified root path.
 
@@ -144,9 +173,7 @@ class ArtifactManifestEntry:
         Raises:
             ValueError: If this artifact entry was not a reference.
         """
-        if self.ref is None:
-            raise ValueError("Only reference entries support ref_target().")
-        return self.ref
+        raise NotImplementedError
 
     def ref_url(self) -> str:
         """
@@ -179,18 +206,9 @@ class Artifact:
     def version(self) -> str:
         """
         Returns:
-            (str): The version of this artifact. For example, if this
+            (int): The version of this artifact. For example, if this
                 is the first version of an artifact, its `version` will
                 be 'v0'.
-        """
-        raise NotImplementedError
-
-    @property
-    def source_version(self) -> Optional[str]:
-        """
-        Returns:
-            (str) The artifact's version index under its parent artifact collection. This will return
-            a string with the format "v{number}".
         """
         raise NotImplementedError
 
@@ -419,7 +437,7 @@ class Artifact:
 
             Adding a directory without an explicit name:
             ```
-            artifact.add_dir('my_dir/', name='destination') # All files in `my_dir/` are added under `destination/`.
+            artifact.add_dir('my_dir/', path='destination') # All files in `my_dir/` are added under `destination/`.
             ```
 
         Raises:
@@ -432,7 +450,7 @@ class Artifact:
 
     def add_reference(
         self,
-        uri: Union[ArtifactManifestEntry, str],
+        uri: Union[ArtifactEntry, str],
         name: Optional[str] = None,
         checksum: bool = True,
         max_objects: Optional[int] = None,
@@ -529,7 +547,7 @@ class Artifact:
         """
         raise NotImplementedError
 
-    def get_path(self, name: str) -> ArtifactManifestEntry:
+    def get_path(self, name: str) -> ArtifactEntry:
         """
         Gets the path to the file located at the artifact relative `name`.
 
@@ -593,9 +611,7 @@ class Artifact:
         """
         raise NotImplementedError
 
-    def download(
-        self, root: Optional[str] = None, recursive: bool = False
-    ) -> util.FilePathStr:
+    def download(self, root: Optional[str] = None, recursive: bool = False) -> str:
         """
         Downloads the contents of the artifact to the specified root directory.
 
@@ -641,7 +657,7 @@ class Artifact:
 
         Arguments:
             root: (str, optional) The directory to verify. If None
-                artifact will be downloaded to './artifacts/self.name/'
+                artifact will be downloaded to './artifacts/<self.name>/'
 
         Raises:
             (ValueError): If the verification fails.
@@ -778,7 +794,7 @@ class StoragePolicy:
         pass
 
     def load_file(
-        self, artifact: Artifact, name: str, manifest_entry: ArtifactManifestEntry
+        self, artifact: Artifact, name: str, manifest_entry: ArtifactEntry
     ) -> str:
         raise NotImplementedError
 
@@ -786,7 +802,7 @@ class StoragePolicy:
         self,
         artifact_id: str,
         artifact_manifest_id: str,
-        entry: ArtifactManifestEntry,
+        entry: ArtifactEntry,
         preparer: "StepPrepare",
         progress_callback: Optional["progress.ProgressFn"] = None,
     ) -> bool:
@@ -801,7 +817,7 @@ class StoragePolicy:
         self,
         artifact: Artifact,
         name: str,
-        manifest_entry: ArtifactManifestEntry,
+        manifest_entry: ArtifactEntry,
         local: bool = False,
     ) -> str:
         raise NotImplementedError
@@ -819,9 +835,9 @@ class StorageHandler:
     def load_path(
         self,
         artifact: Artifact,
-        manifest_entry: ArtifactManifestEntry,
+        manifest_entry: ArtifactEntry,
         local: bool = False,
-    ) -> Union[util.URIStr, util.FilePathStr]:
+    ) -> str:
         """
         Loads the file or directory within the specified artifact given its
         corresponding index entry.
@@ -835,7 +851,7 @@ class StorageHandler:
 
     def store_path(
         self, artifact, path, name=None, checksum=True, max_objects=None
-    ) -> Sequence[ArtifactManifestEntry]:
+    ) -> Sequence[ArtifactEntry]:
         """
         Stores the file or directory at the given path within the specified artifact.
 
@@ -855,7 +871,7 @@ class ArtifactsCache:
 
     def __init__(self, cache_dir):
         self._cache_dir = cache_dir
-        filesystem.mkdir_exists_ok(self._cache_dir)
+        util.mkdir_exists_ok(self._cache_dir)
         self._md5_obj_dir = os.path.join(self._cache_dir, "obj", "md5")
         self._etag_obj_dir = os.path.join(self._cache_dir, "obj", "etag")
         self._artifacts_by_id = {}
@@ -863,34 +879,21 @@ class ArtifactsCache:
         self._random.seed()
         self._artifacts_by_client_id = {}
 
-    def check_md5_obj_path(
-        self, b64_md5: B64MD5, size: int
-    ) -> Tuple[util.FilePathStr, bool, "Opener"]:
-        hex_md5 = b64_to_hex_id(b64_md5)
+    def check_md5_obj_path(self, b64_md5: str, size: int) -> Tuple[str, bool, Callable]:
+        hex_md5 = util.bytes_to_hex(base64.b64decode(b64_md5))
         path = os.path.join(self._cache_dir, "obj", "md5", hex_md5[:2], hex_md5[2:])
         opener = self._cache_opener(path)
         if os.path.isfile(path) and os.path.getsize(path) == size:
             return path, True, opener
-        filesystem.mkdir_exists_ok(os.path.dirname(path))
+        util.mkdir_exists_ok(os.path.dirname(path))
         return path, False, opener
 
-    # TODO(spencerpearson): this method at least needs its signature changed.
-    # An ETag is not (necessarily) a checksum.
-    def check_etag_obj_path(
-        self,
-        url: util.URIStr,
-        etag: ETag,
-        size: int,
-    ) -> Tuple[util.FilePathStr, bool, "Opener"]:
-        hexhash = hashlib.sha256(
-            hashlib.sha256(url.encode("utf-8")).digest()
-            + hashlib.sha256(etag.encode("utf-8")).digest()
-        ).hexdigest()
-        path = os.path.join(self._cache_dir, "obj", "etag", hexhash[:2], hexhash[2:])
+    def check_etag_obj_path(self, etag: str, size: int) -> Tuple[str, bool, Callable]:
+        path = os.path.join(self._cache_dir, "obj", "etag", etag[:2], etag[2:])
         opener = self._cache_opener(path)
         if os.path.isfile(path) and os.path.getsize(path) == size:
             return path, True, opener
-        filesystem.mkdir_exists_ok(os.path.dirname(path))
+        util.mkdir_exists_ok(os.path.dirname(path))
         return path, False, opener
 
     def get_artifact(self, artifact_id):
@@ -942,10 +945,6 @@ class ArtifactsCache:
     def _cache_opener(self, path):
         @contextlib.contextmanager
         def helper(mode="w"):
-
-            if "a" in mode:
-                raise ValueError("Appending to cache files is not supported")
-
             dirname = os.path.dirname(path)
             tmp_file = os.path.join(
                 dirname,
@@ -988,24 +987,6 @@ _artifacts_cache = None
 def get_artifacts_cache() -> ArtifactsCache:
     global _artifacts_cache
     if _artifacts_cache is None:
-        singleton = wandb.sdk.wandb_setup._WandbSetup._instance
-        cache_dir_base = (
-            wandb.run.settings.cache_dir
-            if wandb.run and wandb.run.settings.cache_dir
-            else singleton._settings.cache_dir
-            if singleton and singleton._settings.cache_dir
-            else env.get_cache_dir()
-        )
-        cache_dir = os.path.join(cache_dir_base, "artifacts")
+        cache_dir = os.path.join(env.get_cache_dir(), "artifacts")
         _artifacts_cache = ArtifactsCache(cache_dir)
     return _artifacts_cache
-
-
-def get_staging_dir() -> util.FilePathStr:
-    path = os.path.join(env.get_data_dir(), "artifacts", "staging")
-    filesystem.mkdir_exists_ok(path)
-    return os.path.abspath(os.path.expanduser(path))
-
-
-def get_new_staging_file() -> IO:
-    return tempfile.NamedTemporaryFile(dir=get_staging_dir(), delete=False)

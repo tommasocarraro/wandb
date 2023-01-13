@@ -4,21 +4,21 @@ import multiprocessing
 import os
 import platform
 import queue
-import re
 import signal
 import socket
 import subprocess
 import sys
 import time
 import traceback
-from typing import Any, Dict, List, Optional
-
-import yaml
+from typing import Any, Dict, List
 
 import wandb
-from wandb import util, wandb_lib, wandb_sdk
+from wandb import util
+from wandb import wandb_lib
+from wandb import wandb_sdk
 from wandb.agents.pyagent import pyagent
 from wandb.apis import InternalApi
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +128,6 @@ class Agent:
     FLAPPING_MAX_SECONDS = 60
     FLAPPING_MAX_FAILURES = 3
     MAX_INITIAL_FAILURES = 5
-    DEFAULT_SWEEP_COMMAND: List[str] = [
-        "${env}",
-        "${interpreter}",
-        "${program}",
-        "${args}",
-    ]
-    SWEEP_COMMAND_ENV_VAR_REGEX = re.compile(r"\$\{envvar\:([A-Z0-9_]*)\}")
 
     def __init__(
         self, api, queue, sweep_id=None, function=None, in_jupyter=None, count=None
@@ -248,22 +241,6 @@ class Agent:
                             self._running = False
                             break
                     logger.info("Cleaning up finished run: %s", run_id)
-
-                    # wandb.teardown() was added with wandb service and is a hammer to make
-                    # sure that active runs are finished before moving on to another agent run
-                    #
-                    # In the future, a lighter weight way to implement this could be to keep a
-                    # service process open for all the agent instances and inform_finish when
-                    # the run should be marked complete.  This however could require
-                    # inform_finish on every run created by this process.
-                    if hasattr(wandb, "teardown"):
-                        exit_code = 0
-                        if isinstance(poll_result, int):
-                            exit_code = poll_result
-                        elif isinstance(poll_result, bool):
-                            exit_code = -1
-                        wandb.teardown(exit_code)
-
                     del self._run_processes[run_id]
                     self._last_report_time = None
                     self._finished += 1
@@ -378,24 +355,7 @@ class Agent:
             "args_no_hyphens": flags_no_hyphens,
             "args_no_boolean_flags": flags_no_booleans,
             "args_json": [json.dumps(flags_dict)],
-            "args_dict": flags_dict,
         }
-
-    @staticmethod
-    def _create_sweep_command(command: Optional[List[str]] = None) -> List[str]:
-        """Returns sweep command, filling in environment variable macros."""
-        # Start from default sweep command
-        command = command or Agent.DEFAULT_SWEEP_COMMAND
-        for i, chunk in enumerate(command):
-            # # Replace environment variable macros
-            if Agent.SWEEP_COMMAND_ENV_VAR_REGEX.search(chunk):
-                # Replace from backwards forwards
-                matches = list(Agent.SWEEP_COMMAND_ENV_VAR_REGEX.finditer(chunk))
-                for m in matches[::-1]:
-                    # Default to just leaving as is if environment variable does not exist
-                    _var: str = os.environ.get(m.group(1), m.group(1))
-                    command[i] = f"{command[i][:m.start()]}{_var}{command[i][m.end():]}"
-        return command
 
     def _command_run(self, command):
         logger.info(
@@ -417,8 +377,13 @@ class Agent:
                 )
             )
 
-        # Setup sweep command
-        sweep_command: List[str] = Agent._create_sweep_command(self._sweep_command)
+        # setup default sweep command if not configured
+        sweep_command = self._sweep_command or [
+            "${env}",
+            "${interpreter}",
+            "${program}",
+            "${args}",
+        ]
 
         run_id = command.get("run_id")
         sweep_id = os.environ.get(wandb.env.SWEEP_ID)
@@ -606,14 +571,16 @@ def agent(sweep_id, function=None, entity=None, project=None, count=None):
         <!--yeadoc-test:one-parameter-sweep-agent-->
         ```python
         import wandb
-
         sweep_configuration = {
             "name": "my-awesome-sweep",
             "metric": {"name": "accuracy", "goal": "maximize"},
             "method": "grid",
-            "parameters": {"a": {"values": [1, 2, 3, 4]}},
+            "parameters": {
+                "a": {
+                    "values": [1, 2, 3, 4]
+                }
+            }
         }
-
 
         def my_train_func():
             # read the current value of parameter "a" from wandb.config
@@ -621,7 +588,6 @@ def agent(sweep_id, function=None, entity=None, project=None, count=None):
             a = wandb.config.a
 
             wandb.log({"a": a, "accuracy": a + 1})
-
 
         sweep_id = wandb.sweep(sweep_configuration)
 

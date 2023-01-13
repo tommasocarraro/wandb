@@ -1,46 +1,15 @@
 # Note: this is a helper printer class, this file might go away once we switch to rich console printing
 
+from abc import abstractmethod
 import itertools
 import platform
 import sys
-from abc import abstractmethod
-from typing import Callable, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import click
-
 import wandb
 
 from . import ipython, sparkline
-
-# Follow the same logic as the python logging module
-CRITICAL = 50
-FATAL = CRITICAL
-ERROR = 40
-WARNING = 30
-WARN = WARNING
-INFO = 20
-DEBUG = 10
-NOTSET = 0
-
-_level_to_name = {
-    CRITICAL: "CRITICAL",
-    ERROR: "ERROR",
-    WARNING: "WARNING",
-    INFO: "INFO",
-    DEBUG: "DEBUG",
-    NOTSET: "NOTSET",
-}
-
-_name_to_level = {
-    "CRITICAL": CRITICAL,
-    "FATAL": FATAL,
-    "ERROR": ERROR,
-    "WARN": WARNING,
-    "WARNING": WARNING,
-    "INFO": INFO,
-    "DEBUG": DEBUG,
-    "NOTSET": NOTSET,
-}
 
 
 class _Printer:
@@ -59,41 +28,20 @@ class _Printer:
         self,
         text: Union[str, List[str], Tuple[str]],
         *,
-        level: Optional[Union[str, int]] = None,
+        status: Optional[str] = None,
         off: Optional[bool] = None,
-        default_text: Optional[Union[str, List[str], Tuple[str]]] = None,
     ) -> None:
-        if off:
-            return
-        self._display(text, level=level, default_text=default_text)
+        if not off:
+            self._display(text, status=status)
 
     @abstractmethod
     def _display(
         self,
         text: Union[str, List[str], Tuple[str]],
         *,
-        level: Optional[Union[str, int]] = None,
-        default_text: Optional[Union[str, List[str], Tuple[str]]] = None,
+        status: Optional[str] = None,
     ) -> None:
         raise NotImplementedError
-
-    @staticmethod
-    def _sanitize_level(name_or_level: Optional[Union[str, int]]) -> int:
-        if isinstance(name_or_level, str):
-            try:
-                return _name_to_level[name_or_level.upper()]
-            except KeyError:
-                raise ValueError(
-                    f"Unknown level name: {name_or_level}, supported levels: {_name_to_level.keys()}"
-                )
-
-        if isinstance(name_or_level, int):
-            return name_or_level
-
-        if name_or_level is None:
-            return INFO
-
-        raise ValueError(f"Unknown status level {name_or_level}")
 
     @abstractmethod
     def code(self, text: str) -> str:
@@ -135,74 +83,46 @@ class PrinterTerm(_Printer):
         self._progress = itertools.cycle(["-", "\\", "|", "/"])
 
     def _display(
-        self,
-        text: Union[str, List[str], Tuple[str]],
-        *,
-        level: Optional[Union[str, int]] = None,
-        default_text: Optional[Union[str, List[str], Tuple[str]]] = None,
+        self, text: Union[str, List[str], Tuple[str]], *, status: Optional[str] = None
     ) -> None:
         text = "\n".join(text) if isinstance(text, (list, tuple)) else text
-        if default_text is not None:
-            default_text = (
-                "\n".join(default_text)
-                if isinstance(default_text, (list, tuple))
-                else default_text
-            )
-            text = text or default_text
-        self._display_fn_mapping(level)(text)
-
-    @staticmethod
-    def _display_fn_mapping(level: Optional[Union[str, int]]) -> Callable[[str], None]:
-        level = _Printer._sanitize_level(level)
-
-        if level >= CRITICAL:
-            return wandb.termerror
-        elif ERROR <= level < CRITICAL:
-            return wandb.termerror
-        elif WARNING <= level < ERROR:
-            return wandb.termwarn
-        elif INFO <= level < WARNING:
-            return wandb.termlog
-        elif DEBUG <= level < INFO:
-            return wandb.termlog
+        if status == "info" or status is None:
+            wandb.termlog(text)
+        elif status == "warn":
+            wandb.termwarn(text)
+        elif status == "error":
+            wandb.termerror(text)
         else:
-            return wandb.termlog
+            raise
 
-    def progress_update(self, text: str, percent_done: Optional[float] = None) -> None:
+    def progress_update(self, text: str, percentage: Optional[float] = None) -> None:
         wandb.termlog(f"{next(self._progress)} {text}", newline=False)
 
     def progress_close(self) -> None:
         wandb.termlog(" " * 79)
 
     def code(self, text: str) -> str:
-        ret: str = click.style(text, bold=True)
-        return ret
+        return click.style(text, bold=True)
 
     def name(self, text: str) -> str:
-        ret: str = click.style(text, fg="yellow")
-        return ret
+        return click.style(text, fg="yellow")
 
     def link(self, link: str, text: Optional[str] = None) -> str:
-        ret: str = click.style(link, fg="blue", underline=True)
-        # ret = f"\x1b[m{text or link}\x1b[0m"
-        # ret = f"\x1b]8;;{link}\x1b\\{ret}\x1b]8;;\x1b\\"
-        return ret
+        return click.style(link, fg="blue", underline=True)
 
     def emoji(self, name: str) -> str:
         emojis = dict()
         if platform.system() != "Windows" and wandb.util.is_unicode_safe(sys.stdout):
-            emojis = dict(star="⭐️", broom="🧹", rocket="🚀", gorilla="🦍", turtle="🐢")
+            emojis = dict(star="⭐️", broom="🧹", rocket="🚀")
 
         return emojis.get(name, "")
 
     def status(self, text: str, failure: Optional[bool] = None) -> str:
         color = "red" if failure else "green"
-        ret: str = click.style(text, fg=color)
-        return ret
+        return click.style(text, fg=color)
 
     def files(self, text: str) -> str:
-        ret: str = click.style(text, fg="magenta", bold=True)
-        return ret
+        return click.style(text, fg="magenta", bold=True)
 
     def grid(self, rows: List[List[str]], title: Optional[str] = None) -> str:
         max_len = max(len(row[0]) for row in rows)
@@ -223,38 +143,17 @@ class PrinterJupyter(_Printer):
         self._progress = ipython.jupyter_progress_bar()
 
     def _display(
-        self,
-        text: Union[str, List[str], Tuple[str]],
-        *,
-        level: Optional[Union[str, int]] = None,
-        default_text: Optional[Union[str, List[str], Tuple[str]]] = None,
+        self, text: Union[str, List[str], Tuple[str]], *, status: Optional[str] = None
     ) -> None:
         text = "<br/>".join(text) if isinstance(text, (list, tuple)) else text
-        if default_text is not None:
-            default_text = (
-                "<br/>".join(default_text)
-                if isinstance(default_text, (list, tuple))
-                else default_text
-            )
-            text = text or default_text
-        self._display_fn_mapping(level)(text)
-
-    @staticmethod
-    def _display_fn_mapping(level: Optional[Union[str, int]]) -> Callable[[str], None]:
-        level = _Printer._sanitize_level(level)
-
-        if level >= CRITICAL:
-            return ipython.display_html
-        elif ERROR <= level < CRITICAL:
-            return ipython.display_html
-        elif WARNING <= level < ERROR:
-            return ipython.display_html
-        elif INFO <= level < WARNING:
-            return ipython.display_html
-        elif DEBUG <= level < INFO:
-            return ipython.display_html
+        if status == "info" or status is None:
+            ipython.display_html(text)
+        elif status == "warn":
+            ipython.display_html(text)
+        elif status == "error":
+            ipython.display_html(text)
         else:
-            return ipython.display_html
+            raise
 
     def code(self, text: str) -> str:
         return f"<code>{text}<code>"

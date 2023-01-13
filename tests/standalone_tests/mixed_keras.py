@@ -1,5 +1,3 @@
-import pathlib
-
 import keras  # noqa: F401
 import numpy as np
 import tensorflow as tf
@@ -8,7 +6,7 @@ from wandb.keras import WandbCallback
 
 
 def main():
-    wandb.init(name=pathlib.Path(__file__).stem)
+    wandb.init(name=__file__)
 
     model = tf.keras.models.Sequential()
     model.add(tf.keras.layers.Conv2D(3, 3, activation="relu", input_shape=(28, 28, 1)))

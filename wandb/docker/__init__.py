@@ -4,11 +4,12 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import requests
 from dockerpycreds.utils import find_executable  # type: ignore
-
-from wandb.docker import auth, www_authenticate
+import requests
+from wandb.docker import auth
+from wandb.docker import www_authenticate
 from wandb.errors import DockerError
+
 
 entrypoint = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "wandb-entrypoint.sh"
@@ -39,7 +40,7 @@ def is_buildx_installed() -> bool:
     """Returns `True` if docker buildx is installed and working."""
     global _buildx_installed
     if _buildx_installed is not None:
-        return _buildx_installed  # type: ignore
+        return _buildx_installed
     if not find_executable("docker"):
         _buildx_installed = False
     else:
@@ -65,7 +66,7 @@ def run(
     args: List[Any],
     capture_stdout: bool = True,
     capture_stderr: bool = True,
-    input: Optional[bytes] = None,
+    input: bytes = None,
     return_stderr: bool = False,
     env: Optional[Dict[str, str]] = None,
 ) -> Union[str, Tuple[str, str]]:
@@ -74,8 +75,14 @@ def run(
     subprocess_env.update(env or {})
     if args[1] == "buildx":
         subprocess_env["DOCKER_CLI_EXPERIMENTAL"] = "enabled"
-    stdout_dest: Optional[int] = subprocess.PIPE if capture_stdout else None
-    stderr_dest: Optional[int] = subprocess.PIPE if capture_stderr else None
+    if capture_stdout:
+        stdout_dest = subprocess.PIPE
+    else:
+        stdout_dest = None
+    if capture_stderr:
+        stderr_dest = subprocess.PIPE
+    else:
+        stderr_dest = None
 
     completed_process = subprocess.run(
         args, input=input, stdout=stdout_dest, stderr=stderr_dest, env=subprocess_env
@@ -100,35 +107,35 @@ def run(
 def _post_process_stream(stream: Optional[bytes]) -> str:
     if stream is None:
         return ""
-    decoded_stream = stream.decode()
-    if len(decoded_stream) != 0 and decoded_stream[-1] == "\n":
-        decoded_stream = decoded_stream[:-1]
-    return decoded_stream
+    stream = stream.decode()
+    if len(stream) != 0 and stream[-1] == "\n":
+        stream = stream[:-1]
+    return stream
 
 
-def default_image(gpu: bool = False) -> str:
+def default_image(gpu=False) -> str:
     tag = "all"
     if not gpu:
         tag += "-cpu"
     return "wandb/deepo:%s" % tag
 
 
-def parse_repository_tag(repo_name: str) -> Tuple[str, Optional[str]]:
+def parse_repository_tag(repo_name: str) -> Tuple[Optional[str]]:
     parts = repo_name.rsplit("@", 1)
     if len(parts) == 2:
-        return parts[0], parts[1]
+        return tuple(parts)
     parts = repo_name.rsplit(":", 1)
     if len(parts) == 2 and "/" not in parts[1]:
-        return parts[0], parts[1]
+        return tuple(parts)
     return repo_name, None
 
 
-def parse(image_name: str) -> Tuple[str, str, str]:
+def parse(image_name: str) -> Tuple[str]:
     repository, tag = parse_repository_tag(image_name)
     registry, repo_name = auth.resolve_repository_name(repository)
     if registry == "docker.io":
         registry = "index.docker.io"
-    return registry, repo_name, (tag or "latest")
+    return registry, repo_name, tag or "latest"
 
 
 def auth_token(registry: str, repo: str) -> Dict[str, str]:
@@ -140,16 +147,11 @@ def auth_token(registry: str, repo: str) -> Dict[str, str]:
     auth_info = auth_config.resolve_authconfig(registry)
     if auth_info:
         normalized = {k.lower(): v for k, v in auth_info.items()}
-        normalized_auth_info = (
-            normalized.get("username"),
-            normalized.get("password"),
-        )
-    else:
-        normalized_auth_info = None
+        auth_info = (normalized.get("username"), normalized.get("password"))
     response = requests.get(f"https://{registry}/v2/", timeout=3)
     if response.headers.get("www-authenticate"):
         try:
-            info: Dict = www_authenticate.parse(response.headers["www-authenticate"])
+            info = www_authenticate.parse(response.headers["www-authenticate"])
         except ValueError:
             info = {}
     else:
@@ -165,12 +167,11 @@ def auth_token(registry: str, repo: str) -> Dict[str, str]:
             + "?service={}&scope=repository:{}:pull".format(
                 info["bearer"]["service"], repo
             ),
-            auth=normalized_auth_info,  # type: ignore
+            auth=auth_info,
             timeout=3,
         )
         res.raise_for_status()
-        result_json: Dict[str, str] = res.json()
-        return result_json
+        return res.json()
     return {}
 
 
@@ -206,17 +207,15 @@ def image_id(image_name: str) -> Optional[str]:
         digests = shell(["inspect", image_name, "--format", "{{json .RepoDigests}}"])
         try:
             if digests is None:
-                raise ValueError
-            im_id: str = json.loads(digests)[0]
-            return im_id
+                raise ValueError()
+            return json.loads(digests)[0]
         except (ValueError, IndexError):
             return image_id_from_registry(image_name)
 
 
 def get_image_uid(image_name: str) -> int:
-    """Retrieve the image default uid through brute force"""
-    image_uid = shell(["run", image_name, "id", "-u"])
-    return int(image_uid) if image_uid else -1
+    """Retreve the image default uid through brute force"""
+    return int(shell(["run", image_name, "id", "-u"]))
 
 
 def push(image: str, tag: str) -> Optional[str]:

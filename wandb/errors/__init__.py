@@ -1,26 +1,10 @@
-__all__ = [
-    "Error",
-    "UsageError",
-    "CommError",
-    "LogError",
-    "DockerError",
-    "LogMultiprocessError",
-    "MultiprocessError",
-    "RequireError",
-    "ExecutionError",
-    "LaunchError",
-    "SweepError",
-    "WaitTimeoutError",
-    "ContextCancelledError",
-]
-
 from typing import List, Optional
 
 
 class Error(Exception):
     """Base W&B Error"""
 
-    def __init__(self, message) -> None:
+    def __init__(self, message):
         super().__init__(message)
         self.message = message
 
@@ -32,7 +16,7 @@ class Error(Exception):
 class CommError(Error):
     """Error communicating with W&B"""
 
-    def __init__(self, msg, exc=None) -> None:
+    def __init__(self, msg, exc=None):
         super().__init__(msg)
         self.message = msg
         self.exc = exc
@@ -83,7 +67,7 @@ class DockerError(Error):
         return_code: int,
         stdout: Optional[bytes] = None,
         stderr: Optional[bytes] = None,
-    ) -> None:
+    ):
         command_launched_str = " ".join(command_launched)
         error_msg = (
             f"The docker command executed was `{command_launched_str}`.\n"
@@ -118,19 +102,16 @@ class SweepError(Error):
     pass
 
 
-class WaitTimeoutError(Error):
-    """Raised when wait() timeout occurs before process is finished"""
-
-    pass
-
-
-class MailboxError(Error):
-    """Generic Mailbox Exception"""
-
-    pass
-
-
-class ContextCancelledError(Error):
-    """Context cancelled Exception"""
-
-    pass
+__all__ = [
+    "Error",
+    "UsageError",
+    "CommError",
+    "LogError",
+    "DockerError",
+    "LogMultiprocessError",
+    "MultiprocessError",
+    "RequireError",
+    "ExecutionError",
+    "LaunchError",
+    "SweepError",
+]

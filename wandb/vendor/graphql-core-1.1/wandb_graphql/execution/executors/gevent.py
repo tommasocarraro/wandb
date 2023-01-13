@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 import gevent
-from wandb_promise import Promise
+from promise import Promise
 
 from .utils import process
 

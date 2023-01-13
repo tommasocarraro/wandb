@@ -1,10 +1,11 @@
 __all__ = ["deprecate", "Deprecated"]
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import wandb
-from wandb.proto.wandb_deprecated import DEPRECATED_FEATURES, Deprecated
+from wandb.proto.wandb_deprecated import Deprecated, DEPRECATED_FEATURES
 from wandb.proto.wandb_telemetry_pb2 import Deprecated as TelemetryDeprecated
+
 
 # avoid cycle, use string type reference
 if TYPE_CHECKING:

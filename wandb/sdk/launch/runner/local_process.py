@@ -5,19 +5,18 @@ from typing import Any, List, Optional
 import wandb
 from wandb.errors import LaunchError
 
-from .._project_spec import LaunchProject, get_entry_point_command
+from .abstract import AbstractRun, AbstractRunner
+from .local_container import _run_entry_point
+from .._project_spec import get_entry_point_command, LaunchProject
 from ..builder.build import get_env_vars_dict
 from ..utils import (
-    LOG_PREFIX,
-    PROJECT_SYNCHRONOUS,
     _is_wandb_uri,
-    download_wandb_python_deps,
     parse_wandb_uri,
+    PROJECT_SYNCHRONOUS,
     sanitize_wandb_api_key,
     validate_wandb_python_deps,
 )
-from .abstract import AbstractRun, AbstractRunner
-from .local_container import _run_entry_point
+
 
 _logger = logging.getLogger(__name__)
 
@@ -38,46 +37,34 @@ class LocalProcessRunner(AbstractRunner):
         **kwargs,
     ) -> Optional[AbstractRun]:
         if args is not None:
-            _msg = f"{LOG_PREFIX}LocalProcessRunner.run received unused args {args}"
-            _logger.warning(_msg)
+            _logger.warning(f"LocalProcessRunner.run received unused args {args}")
         if kwargs is not None:
-            _msg = f"{LOG_PREFIX}LocalProcessRunner.run received unused kwargs {kwargs}"
-            _logger.warning(_msg)
+            _logger.warning(f"LocalProcessRunner.run received unused kwargs {kwargs}")
 
         synchronous: bool = self.backend_config[PROJECT_SYNCHRONOUS]
         entry_point = launch_project.get_single_entry_point()
 
         cmd: List[Any] = []
 
+        if launch_project.uri is None:
+            raise LaunchError("Launch LocalProcessRunner received empty project uri")
         if launch_project.project_dir is None:
             raise LaunchError("Launch LocalProcessRunner received empty project dir")
 
-        # Check to make sure local python dependencies match run's requirement.txt
-        if launch_project.uri and _is_wandb_uri(launch_project.uri):
+        # If URI is not a wandb run, check to make sure local python dependencies match run's requirement.txt
+        if _is_wandb_uri(launch_project.uri):
             source_entity, source_project, run_name = parse_wandb_uri(
                 launch_project.uri
             )
-            run_requirements_file = download_wandb_python_deps(
+            validate_wandb_python_deps(
                 source_entity,
                 source_project,
                 run_name,
                 self._api,
                 launch_project.project_dir,
             )
-            validate_wandb_python_deps(
-                run_requirements_file,
-                launch_project.project_dir,
-            )
-        elif launch_project.job:
-            assert launch_project._job_artifact is not None
-            try:
-                validate_wandb_python_deps(
-                    "requirements.frozen.txt",
-                    launch_project.project_dir,
-                )
-            except Exception:
-                wandb.termwarn("Unable to validate python dependencies")
-        env_vars = get_env_vars_dict(launch_project, self._api)
+
+        env_vars = get_env_vars_dict(launch_project, None, self._api)
         for env_key, env_value in env_vars.items():
             cmd += [f"{shlex.quote(env_key)}={shlex.quote(env_value)}"]
 
@@ -88,8 +75,11 @@ class LocalProcessRunner(AbstractRunner):
         cmd += entry_cmd
 
         command_str = " ".join(cmd).strip()
-        _msg = f"{LOG_PREFIX}Launching run as a local-process with command {sanitize_wandb_api_key(command_str)}"
-        wandb.termlog(_msg)
+        wandb.termlog(
+            "Launching run as a local process with command: {}".format(
+                sanitize_wandb_api_key(command_str)
+            )
+        )
         run = _run_entry_point(command_str, launch_project.project_dir)
         if synchronous:
             run.wait()

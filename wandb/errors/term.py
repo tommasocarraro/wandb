@@ -1,8 +1,9 @@
 import logging
-import sys
 from typing import Any
+import sys
 
 import click
+
 
 LOG_STRING = click.style("wandb", fg="blue", bold=True)
 LOG_STRING_NOCOLOR = "wandb"

@@ -1,4 +1,4 @@
-from wandb_promise import Promise
+from promise import Promise
 
 from ...type import GraphQLSchema
 from ..base import ExecutionContext, ExecutionResult, get_operation_root_type

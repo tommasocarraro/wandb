@@ -1,6 +1,6 @@
 from multiprocessing import Process, Queue
 
-from wandb_promise import Promise
+from promise import Promise
 
 from .utils import process
 

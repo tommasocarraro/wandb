@@ -1,19 +1,21 @@
-import concurrent.futures
 import logging
 import os
 import queue
 import tempfile
 import time
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import Mapping, Optional, Tuple, TYPE_CHECKING
 
 import wandb
-import wandb.util
 from wandb.filesync import dir_watcher, stats, step_checksum, step_upload
+import wandb.util
 
 if TYPE_CHECKING:
     from wandb.sdk.interface import artifacts
-    from wandb.sdk.internal import artifacts as internal_artifacts
-    from wandb.sdk.internal import file_stream, internal_api
+    from wandb.sdk.internal import (
+        artifacts as internal_artifacts,
+        file_stream,
+        internal_api,
+    )
 
 
 # Temporary directory for copies we make of some file types to
@@ -69,7 +71,7 @@ class FilePusher:
         )
         self._step_upload.start()
 
-    def get_status(self) -> Tuple[bool, stats.Summary]:
+    def get_status(self) -> Tuple[bool, Mapping[str, int]]:
         running = self.is_alive()
         summary = self._stats.summary()
         return running, summary
@@ -83,9 +85,9 @@ class FilePusher:
                 stop = True
             summary = self._stats.summary()
             line = " {:.2f}MB of {:.2f}MB uploaded ({:.2f}MB deduped)\r".format(
-                summary.uploaded_bytes / 1048576.0,
-                summary.total_bytes / 1048576.0,
-                summary.deduped_bytes / 1048576.0,
+                summary["uploaded_bytes"] / 1048576.0,
+                summary["total_bytes"] / 1048576.0,
+                summary["deduped_bytes"] / 1048576.0,
             )
             line = spinner_states[step % 4] + line
             step += 1
@@ -94,8 +96,8 @@ class FilePusher:
                 break
             time.sleep(0.25)
         dedupe_fraction = (
-            summary.deduped_bytes / float(summary.total_bytes)
-            if summary.total_bytes > 0
+            summary["deduped_bytes"] / float(summary["total_bytes"])
+            if summary["total_bytes"] > 0
             else 0
         )
         if dedupe_fraction > 0.01:
@@ -107,14 +109,18 @@ class FilePusher:
         # clear progress line.
         wandb.termlog(" " * 79, prefix=prefix)
 
-    def file_counts_by_category(self) -> stats.FileCountsByCategory:
+    def file_counts_by_category(self) -> Mapping[str, int]:
         return self._stats.file_counts_by_category()
 
     def file_changed(
         self,
         save_name: dir_watcher.SaveName,
         path: str,
+        artifact_id: Optional[str] = None,
         copy: bool = True,
+        use_prepare_flow: bool = False,
+        save_fn: Optional[step_upload.SaveFn] = None,
+        digest: Optional[str] = None,
     ):
         """Tell the file pusher that a file's changed and should be uploaded.
         Arguments:
@@ -132,7 +138,11 @@ class FilePusher:
         event = step_checksum.RequestUpload(
             path,
             dir_watcher.SaveName(save_name),
+            artifact_id,
             copy,
+            use_prepare_flow,
+            save_fn,
+            digest,
         )
         self._incoming_queue.put(event)
 
@@ -148,13 +158,12 @@ class FilePusher:
     def commit_artifact(
         self,
         artifact_id: str,
-        *,
         finalize: bool = True,
-        before_commit: step_upload.PreCommitFn,
-        result_fut: "concurrent.futures.Future[None]",
+        before_commit: Optional[step_upload.PreCommitFn] = None,
+        on_commit: Optional[step_upload.PostCommitFn] = None,
     ):
         event = step_checksum.RequestCommitArtifact(
-            artifact_id, finalize, before_commit, result_fut
+            artifact_id, finalize, before_commit, on_commit
         )
         self._incoming_queue.put(event)
 

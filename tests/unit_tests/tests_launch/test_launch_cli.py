@@ -1,274 +1,491 @@
 import json
+import os
 
-import pytest
 import wandb
 from wandb.cli import cli
+from wandb.errors import LaunchError
+from wandb.sdk.launch.utils import LAUNCH_CONFIG_FILE
+import pytest
 
-REPO_CONST = "test-repo"
-IMAGE_CONST = "fake-image"
-QUEUE_NAME = "test_queue"
+from .test_launch import mocked_fetchable_git_repo, mock_load_backend  # noqa: F401
 
 
-@pytest.mark.timeout(200)
-@pytest.mark.parametrize(
-    "args,override_config",
-    [
-        (
-            ["--build", "--queue", QUEUE_NAME],
-            {"registry": {"url": REPO_CONST}},
-        ),
-        (
-            ["--queue", "--build", "--repository", REPO_CONST],
-            {
-                "registry": {"url": "testing123"},
-                "docker": {"args": ["--container_arg", "9-rams"]},
-            },
-        ),
-    ],
-    ids=[
-        "queue default build",
-        "repository and docker args override",
-    ],
-)
-def test_launch_build_succeeds(
-    relay_server,
-    user,
-    monkeypatch,
-    runner,
-    args,
-    override_config,
-):
-    base_args = [
-        "https://github.com/wandb/examples.git",
-        "--entity",
-        user,
-        "--entry-point",
-        "python main.py",
-        "-c",
-        json.dumps(override_config),
-    ]
+def raise_(ex):
+    raise ex
+
+
+@pytest.fixture
+def kill_agent_on_update_job(monkeypatch):
+    def patched_update_finished(self, job_id):
+        if self._jobs[job_id].get_status().state in ["failed", "finished"]:
+            self.finish_job_id(job_id)
+            if self._running == 0:
+                # only 1 run in test so kill after it's done
+                raise KeyboardInterrupt
 
     monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "validate_docker_installation",
-        lambda: None,
+        "wandb.sdk.launch.agent.LaunchAgent._update_finished",
+        lambda c, job_id: patched_update_finished(c, job_id),
     )
 
-    def patched_launch_add(*args, **kwargs):
-        if not kwargs.get("build"):
-            raise Exception(kwargs)
 
-        if "--repository" in args:
-            if not kwargs.get("repository"):
-                raise Exception(kwargs)
-
-        if args[3]:  # config
-            assert args[3] == override_config
-
-    monkeypatch.setattr(
-        "wandb.cli.cli._launch_add",
-        lambda *args, **kwargs: patched_launch_add(*args, **kwargs),
-    )
-
-    with runner.isolated_filesystem(), relay_server():
-        result = runner.invoke(cli.launch, base_args + args)
-
-        assert result.exit_code == 0
-
-
-@pytest.mark.timeout(100)
-@pytest.mark.parametrize(
-    "args",
-    [(["--build"]), (["--build=builder"])],
-    ids=["no queue flag", "builder argument"],
-)
-def test_launch_build_fails(
-    relay_server,
-    user,
-    monkeypatch,
-    runner,
-    args,
-):
-    base_args = [
-        "https://foo:bar@github.com/FooTest/Foo.git",
-        "--entity",
-        user,
-        "--entry-point",
-        "python main.py",
-    ]
-
-    monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "validate_docker_installation",
-        lambda: None,
-    )
-
-    def patched_fetch_and_val(launch_project, _):
-        return launch_project
-
-    monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "fetch_and_validate_project",
-        lambda *args, **kwargs: patched_fetch_and_val(*args, **kwargs),
-    )
-
-    monkeypatch.setattr(
-        "wandb.docker",
-        lambda: "docker",
-    )
-
-    with runner.isolated_filesystem(), relay_server():
-        result = runner.invoke(cli.launch, base_args + args)
-
-        if args == ["--build"]:
-            assert result.exit_code == 1
-            assert "Build flag requires a queue to be set" in result.output
-        elif args == ["--build=builder"]:
-            assert result.exit_code == 2
-            assert (
-                "Option '--build' does not take a value" in result.output
-                or "Error: --build option does not take a value" in result.output
-            )
-
-
-@pytest.mark.timeout(300)
-@pytest.mark.parametrize(
-    "args",
-    [
-        (["--repository=test_repo", "--resource=local"]),
-        (["--repository="]),
-        (["--repository"]),
-    ],
-    ids=["set repository", "set repository empty", "set repository empty2"],
-)
-def test_launch_repository_arg(
-    relay_server,
-    monkeypatch,
-    runner,
-    args,
-    user,
-    wandb_init,
-    test_settings,
-):
-    base_args = [
-        "https://github.com/wandb/examples",
-        "--entity",
-        user,
-    ]
-
-    def patched_run(
-        uri,
-        job,
-        api,
-        name,
-        project,
-        entity,
-        docker_image,
-        resource,
-        entry_point,
-        version,
-        parameters,
-        resource_args,
-        launch_config,
-        synchronous,
-        cuda,
-        run_id,
-        repository,
-    ):
-        assert repository or "--repository=" in args or "--repository" in args
-
-        return "run"
-
-    monkeypatch.setattr(
-        "wandb.sdk.launch.launch._run",
-        lambda *args, **kwargs: patched_run(*args, **kwargs),
-    )
-
-    def patched_fetch_and_val(launch_project, _):
-        return launch_project
-
-    monkeypatch.setattr(
-        "wandb.sdk.launch.launch.fetch_and_validate_project",
-        lambda *args, **kwargs: patched_fetch_and_val(*args, **kwargs),
-    )
-
-    monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "validate_docker_installation",
-        lambda: None,
-    )
-
-    monkeypatch.setattr(
-        "wandb.docker",
-        lambda: "testing",
-    )
-
-    with runner.isolated_filesystem(), relay_server():
-        result = runner.invoke(cli.launch, base_args + args)
-
-        if "--respository=" in args or "--repository" in args:  # incorrect param
-            assert result.exit_code == 2
-        else:
-            assert result.exit_code == 0
-
-
-def test_launch_bad_api_key(runner, monkeypatch, user):
+def test_launch_add_default(runner, test_settings, live_mock_server):
     args = [
         "https://wandb.ai/mock_server_entity/test_project/runs/run",
-        "--entity",
-        user,
+        "--project=test_project",
+        "--entity=mock_server_entity",
         "--queue=default",
     ]
-    monkeypatch.setenv("WANDB_API_KEY", "4" * 40)
-    monkeypatch.setattr("wandb.sdk.internal.internal_api.Api.viewer", lambda a: False)
-    with runner.isolated_filesystem():
-        result = runner.invoke(cli.launch, args)
-
-        assert "Could not connect with current API-key." in result.output
+    result = runner.invoke(cli.launch, args)
+    assert result.exit_code == 0
+    ctx = live_mock_server.get_ctx()
+    assert len(ctx["run_queues"]["1"]) == 1
 
 
-def test_launch_build_with_local(
-    relay_server,
-    user,
-    monkeypatch,
+def test_launch_add_config_file(runner, test_settings, live_mock_server):
+    args = [
+        "https://wandb.ai/mock_server_entity/test_project/runs/run",
+        "--project=test_project",
+        "--entity=mock_server_entity",
+        "--queue=default",
+    ]
+    result = runner.invoke(cli.launch, args)
+    assert result.exit_code == 0
+    ctx = live_mock_server.get_ctx()
+    assert len(ctx["run_queues"]["1"]) == 1
+
+
+# this test includes building a docker container which can take some time.
+# hence the timeout. caching should usually keep this under 30 seconds
+@pytest.mark.flaky
+@pytest.mark.xfail(reason="test goes through flaky periods. Re-enable with WB7616")
+@pytest.mark.timeout(320)
+def test_launch_agent_base(
     runner,
+    test_settings,
+    live_mock_server,
+    mocked_fetchable_git_repo,
+    kill_agent_on_update_job,
+    monkeypatch,
 ):
-    base_args = [
-        "https://foo:bar@github.com/FooTest/Foo.git",
-        "--entity",
-        user,
-        "--entry-point",
-        "python main.py",
-        "--build",
-        "--queue=default",
-        "--resource=local-process",
-    ]
-
     monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "validate_docker_installation",
-        lambda: None,
+        wandb.sdk.launch.utils,
+        "LAUNCH_CONFIG_FILE",
+        os.path.join("./config/wandb/launch-config.yaml"),
     )
+    launch_config = {"build": {"type": "docker"}, "registry": {"url": "test"}}
 
-    def patched_fetch_and_val(launch_project, _):
-        return launch_project
+    with runner.isolated_filesystem():
+        os.makedirs(os.path.expanduser("./config/wandb"))
+        with open(os.path.expanduser("./config/wandb/launch-config.yaml"), "w") as f:
+            json.dump(launch_config, f)
+        result = runner.invoke(cli.launch_agent, "test_project")
+        ctx = live_mock_server.get_ctx()
+        assert ctx["num_popped"] == 1
+        assert ctx["num_acked"] == 1
+        assert len(ctx["launch_agents"].keys()) == 1
+        assert ctx["run_queues_return_default"] is True
+        assert "Shutting down, active jobs" in result.output
+        assert "polling on project" in result.output
 
-    monkeypatch.setattr(
-        wandb.sdk.launch.builder.build,
-        "fetch_and_validate_project",
-        lambda *args, **kwargs: patched_fetch_and_val(*args, **kwargs),
-    )
 
-    monkeypatch.setattr(
-        "wandb.docker",
-        lambda: "docker",
-    )
-
-    with runner.isolated_filesystem(), relay_server():
-        result = runner.invoke(cli.launch, base_args)
-        print(result.output)
-        assert result.exit_code == 1
-        assert (
-            "Cannot build a docker image for the resource: local-process"
-            in result.output
+def test_agent_queues_notfound(runner, test_settings, live_mock_server):
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch_agent,
+            [
+                "--project",
+                "test_project",
+                "--entity",
+                "mock_server_entity",
+                "--queues",
+                "nonexistent_queue",
+            ],
         )
+        assert result.exit_code != 0
+        assert "Not all of requested queues (nonexistent_queue) found" in result.output
+
+
+def test_agent_failed_default_create(runner, test_settings, live_mock_server):
+    with runner.isolated_filesystem():
+        live_mock_server.set_ctx({"successfully_create_default_queue": False})
+        live_mock_server.set_ctx({"run_queues_return_default": False})
+        result = runner.invoke(
+            cli.launch_agent,
+            [
+                "--project",
+                "test_project",
+                "--entity",
+                "mock_server_entity",
+            ],
+        )
+        assert result.exit_code != 0
+
+
+def test_agent_update_failed(runner, test_settings, live_mock_server, monkeypatch):
+    live_mock_server.set_ctx({"launch_agent_update_fail": True})
+    monkeypatch.setattr(
+        wandb.sdk.launch.agent.agent.LaunchAgent,
+        "pop_from_queue",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        wandb.sdk.launch.agent.agent.LaunchAgent,
+        "print_status",
+        lambda x: raise_(KeyboardInterrupt),
+    )
+
+    # m = mock.Mock()
+    # m.sleep = lambda x: raise_(KeyboardInterrupt)
+    # with mock.patch.dict("sys.modules", time=m):
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch_agent,
+            [
+                "--project",
+                "test_project",
+                "--entity",
+                "mock_server_entity",
+            ],
+        )
+
+        assert "Failed to update agent status" in result.output
+
+
+def test_agent_stop_polling(runner, live_mock_server, monkeypatch):
+    def patched_pop_empty_queue(self, queue):
+        # patch to no result, agent should read stopPolling and stop
+        return None
+
+    monkeypatch.setattr(
+        "wandb.sdk.launch.agent.LaunchAgent.pop_from_queue",
+        lambda c, queue: patched_pop_empty_queue(c, queue),
+    )
+    live_mock_server.set_ctx({"stop_launch_agent": True})
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch_agent,
+            [
+                "--project",
+                "test_project",
+                "--entity",
+                "mock_server_entity",
+            ],
+        )
+
+    assert "Shutting down, active jobs" in result.output
+
+
+def test_launch_sweep_scheduler(runner, test_settings, live_mock_server):
+    # Create a test sweep
+    sweep_config = {
+        "name": "My Sweep",
+        "method": "grid",
+        "parameters": {"parameter1": {"values": [1, 2, 3]}},
+    }
+    sweep_id = wandb.sweep(sweep_config)
+    assert sweep_id == "test"
+    # Create the default queue
+    result = runner.invoke(
+        cli.launch,
+        [
+            "https://wandb.ai/mock_server_entity/test_project/runs/run",
+            "--project",
+            "test_project",
+            "--entity",
+            "mock_server_entity",
+            "--queue",
+            "default",
+        ],
+    )
+    assert result.exit_code == 0
+    ctx = live_mock_server.get_ctx()
+    assert len(ctx["run_queues"]["1"]) == 1
+    # Run the launch sweep scheduler CLI command
+    result = runner.invoke(
+        cli.scheduler,
+        [
+            "--project",
+            "test_project",
+            "--entity",
+            "mock_server_entity",
+            "--queue",
+            "default",
+            sweep_id,
+        ],
+    )
+    assert result.exit_code == 0
+
+
+# this test includes building a docker container which can take some time.
+# hence the timeout. caching should usually keep this under 30 seconds
+@pytest.mark.timeout(320)
+def test_launch_cli_with_config_file_and_params(
+    runner, mocked_fetchable_git_repo, live_mock_server
+):
+    config = {
+        "uri": "https://wandb.ai/mock_server_entity/test_project/runs/1",
+        "project": "test_project",
+        "entity": "mock_server_entity",
+        "resource": "local",
+        "overrides": {"args": ["--epochs", "5"]},
+    }
+    with runner.isolated_filesystem():
+        with open("config.json", "w") as fp:
+            json.dump(
+                config,
+                fp,
+            )
+
+        result = runner.invoke(
+            cli.launch,
+            [
+                "-c",
+                "config.json",
+                "-a",
+                "epochs=1",
+                "https://wandb.ai/mock_server_entity/test_project/runs/1",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Launching run in docker with command: docker run" in result.output
+
+
+@pytest.mark.timeout(320)
+def test_launch_cli_with_config_and_params(
+    runner, mocked_fetchable_git_repo, live_mock_server
+):
+    config = {
+        "uri": "https://wandb.ai/mock_server_entity/test_project/runs/1",
+        "project": "test_project",
+        "entity": "mock_server_entity",
+        "resource": "local",
+        "overrides": {"args": ["--epochs", "5"]},
+    }
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            [
+                "-c",
+                json.dumps(config),
+                "-a",
+                "epochs=1",
+                "https://wandb.ai/mock_server_entity/test_project/runs/1",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Launching run in docker with command: docker run" in result.output
+
+
+def test_launch_no_docker_exec(
+    runner,
+    monkeypatch,
+    mocked_fetchable_git_repo,
+    test_settings,
+):
+    monkeypatch.setattr(
+        wandb.sdk.launch.builder.build, "find_executable", lambda name: False
+    )
+    result = runner.invoke(
+        cli.launch,
+        ["https://wandb.ai/mock_server_entity/test_project/runs/1"],
+    )
+    assert result.exit_code == 1
+    assert "Could not find Docker executable" in str(result.exception)
+
+
+def test_sweep_launch_scheduler(runner, mock_server, test_settings):
+    sweep_id = wandb.sweep(
+        {
+            "name": "My Sweep",
+            "method": "grid",
+            "parameters": {"parameter1": {"values": [1, 2, 3]}},
+        }
+    )
+    assert sweep_id == "test"
+    result = runner.invoke(
+        cli.sweep,
+        [
+            sweep_id,
+            "--queue",
+            "default",
+            "--entity",
+            "mock_server_entity",
+        ],
+    )
+    assert result.exit_code == 0
+
+
+@pytest.mark.timeout(320)
+def test_launch_github_url(runner, mocked_fetchable_git_repo, live_mock_server):
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            [
+                "https://github.com/test/repo.git",
+                "--entry-point",
+                "python train.py",
+            ],
+        )
+    print(result)
+    assert result.exit_code == 0
+
+    assert "Launching run in docker with command: docker run" in result.output
+
+
+@pytest.mark.timeout(320)
+def test_launch_local_dir(runner):
+    with runner.isolated_filesystem():
+        os.mkdir("repo")
+        with open("repo/main.py", "w+") as f:
+            f.write('print("ok")\n')
+        with open("repo/requirements.txt", "w+") as f:
+            f.write("wandb\n")
+        result = runner.invoke(
+            cli.launch,
+            ["repo"],
+        )
+
+    assert result.exit_code == 0
+    assert "Launching run in docker with command: docker run" in result.output
+
+
+def test_launch_queue_error(runner):
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            [
+                "https://github.com/test/repo.git",
+                "--entry-point",
+                "train.py",
+                "--async",
+                "--queue",
+                "default",
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert "Cannot use both --async and --queue with wandb launch" in result.output
+
+
+def test_launch_supplied_docker_image(
+    runner,
+    monkeypatch,
+    live_mock_server,
+):
+    def patched_run_run_entry(cmd, dir):
+        print(f"running command: {cmd}")
+        return cmd  # noop
+
+    monkeypatch.setattr(
+        "wandb.sdk.launch.runner.local_container.pull_docker_image",
+        lambda docker_image: None,
+    )
+    monkeypatch.setattr(
+        "wandb.sdk.launch.runner.local_container._run_entry_point",
+        patched_run_run_entry,
+    )
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            [
+                "--async",
+                "--docker-image",
+                "test:tag",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "-e WANDB_DOCKER=test:tag" in result.output
+    assert " -e WANDB_CONFIG='{}'" in result.output
+    assert "-e WANDB_ARTIFACTS='{}'" in result.output
+    assert "test:tag" in result.output
+
+
+@pytest.mark.timeout(320)
+def test_launch_cuda_flag(runner, live_mock_server, mocked_fetchable_git_repo):
+    args = [
+        "https://wandb.ai/mock_server_entity/test_project/runs/run",
+        "--entry-point",
+        "train.py",
+    ]
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            args + ["--cuda"],
+        )
+    assert result.exit_code == 0
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            args + ["--cuda", "False"],
+        )
+    assert result.exit_code == 0
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch,
+            args + ["--cuda", "asdf"],
+        )
+    assert result.exit_code != 0
+    assert "Invalid value for --cuda:" in result.output
+
+
+def test_launch_agent_project_environment_variable(
+    runner,
+    test_settings,
+    live_mock_server,
+    monkeypatch,
+):
+    monkeypatch.setenv("WANDB_PROJECT", "test_project")
+    monkeypatch.setattr(
+        "wandb.sdk.launch.agent.LaunchAgent.run_job",
+        lambda a, b: raise_(KeyboardInterrupt),
+    )
+    result = runner.invoke(cli.launch_agent)
+    assert (
+        "You must specify a project name or set WANDB_PROJECT environment variable."
+        not in str(result.output)
+    )
+
+
+def test_launch_agent_no_project(runner, test_settings, live_mock_server, monkeypatch):
+    monkeypatch.setattr(
+        "wandb.sdk.launch.launch.LAUNCH_CONFIG_FILE", "./random-nonexistant-file.yaml"
+    )
+    result = runner.invoke(cli.launch_agent)
+    assert result.exit_code == 1
+    assert (
+        "You must specify a project name or set WANDB_PROJECT environment variable."
+        in str(result.output)
+    )
+
+
+def test_launch_agent_launch_error_continue(
+    runner, test_settings, live_mock_server, monkeypatch
+):
+    def print_then_exit():
+        print("except caught, acked item")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "wandb.sdk.launch.agent.LaunchAgent.run_job",
+        lambda a, b: raise_(LaunchError("blah blah")),
+    )
+    monkeypatch.setattr(
+        "wandb.sdk.internal.internal_api.Api.ack_run_queue_item",
+        lambda a, b: print_then_exit(),
+    )
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli.launch_agent,
+            [
+                "--project",
+                "test_project",
+                "--entity",
+                "mock_server_entity",
+            ],
+        )
+        assert "blah blah" in result.output
+        assert "except caught, acked item" in result.output

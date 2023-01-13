@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.7.1-runtime-ubuntu20.04
+FROM nvidia/cuda:11.3.1-runtime-ubuntu20.04
 
 # todo: rm once nvidia updates their docker images
 RUN apt-key adv --fetch-keys \
@@ -8,7 +8,7 @@ RUN apt-key adv --fetch-keys \
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-ARG PYTHON_VERSION=3.9
+ARG PYTHON_VERSION=3.8
 ARG GIT_BRANCH=master
 ARG TOX_VERSION=3.24.0
 ARG UTC_DATE
@@ -41,18 +41,18 @@ USER sdk
 ENV HOME=/home/sdk
 RUN chmod 777 /home/sdk
 
-# clone wandb/wandb repository and install wandb sdk
-RUN git clone https://github.com/wandb/wandb.git /wandb/wandb \
-    && cd /wandb/wandb \
+# clone wandb/client repository and install wandb sdk
+RUN git clone https://github.com/wandb/client.git /wandb/client \
+    && cd /wandb/client \
     && git checkout ${GIT_BRANCH} \
     && pip install --upgrade pip \
     && pip install tox==${TOX_VERSION} --no-cache-dir
 
 RUN PATH=/home/sdk/.local/bin:$PATH
 
-WORKDIR /wandb/wandb
-# use torch wheels with CUDA 11.7 support
-RUN sed -i -e 's/whl\/cpu/whl\/cu117/g' tox.ini
+WORKDIR /wandb/client
+# use torch wheels with CUDA 11.3 support
+RUN sed -i -e 's/whl\/cpu/whl\/cu113/g' tox.ini
 ENV DATE=$UTC_DATE
 #CMD ["tail", "-f", "/dev/null"]
-CMD ["python", "-m", "tox", "-v", "-e", "standalone-gpu-py39,pod-store"]
+CMD ["python", "-m", "tox", "-v", "-e", "standalone-gpu-py38"]

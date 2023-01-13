@@ -9,17 +9,20 @@ from typing import Any, Dict, List, Optional
 import wandb
 from wandb.sdk.launch.builder.abstract import AbstractBuilder
 
-from .._project_spec import LaunchProject, get_entry_point_command
-from ..builder.build import docker_image_exists, get_env_vars_dict, pull_docker_image
+from .abstract import AbstractRun, AbstractRunner, Status
+from .._project_spec import get_entry_point_command, LaunchProject
+from ..builder.build import (
+    get_env_vars_dict,
+    pull_docker_image,
+)
 from ..utils import (
-    LOG_PREFIX,
-    PROJECT_DOCKER_ARGS,
-    PROJECT_SYNCHRONOUS,
     _is_wandb_dev_uri,
     _is_wandb_local_uri,
+    PROJECT_DOCKER_ARGS,
+    PROJECT_SYNCHRONOUS,
     sanitize_wandb_api_key,
 )
-from .abstract import AbstractRun, AbstractRunner, Status
+
 
 _logger = logging.getLogger(__name__)
 
@@ -51,8 +54,10 @@ class LocalSubmittedRun(AbstractRun):
             except OSError:
                 # The child process may have exited before we attempted to terminate it, so we
                 # ignore OSErrors raised during child process termination
-                _msg = f"{LOG_PREFIX}Failed to terminate child process PID {self.command_proc.pid}"
-                _logger.debug(_msg)
+                _logger.info(
+                    "Failed to terminate child process (PID %s). The process may have already exited.",
+                    self.command_proc.pid,
+                )
             self.command_proc.wait()
 
     def get_status(self) -> Status:
@@ -87,7 +92,7 @@ class LocalContainerRunner(AbstractRunner):
                 docker_args["add-host"] = "host.docker.internal:host-gateway"
 
         entry_point = launch_project.get_single_entry_point()
-        env_vars = get_env_vars_dict(launch_project, self._api)
+        env_vars = get_env_vars_dict(launch_project, entry_point, self._api)
 
         # When running against local port, need to swap to local docker host
         if (
@@ -101,9 +106,8 @@ class LocalContainerRunner(AbstractRunner):
 
         if launch_project.docker_image:
             # user has provided their own docker image
-            image_uri = launch_project.image_name
-            if not docker_image_exists(image_uri):
-                pull_docker_image(image_uri)
+            image_uri = launch_project.docker_image
+            pull_docker_image(image_uri)
             env_vars.pop("WANDB_RUN_ID")
             # if they've given an override to the entrypoint
             entry_cmd = get_entry_point_command(
@@ -128,8 +132,7 @@ class LocalContainerRunner(AbstractRunner):
         if not self.ack_run_queue_item(launch_project):
             return None
         sanitized_cmd_str = sanitize_wandb_api_key(command_str)
-        _msg = f"{LOG_PREFIX}Launching run in docker with command: {sanitized_cmd_str}"
-        wandb.termlog(_msg)
+        wandb.termlog(f"Launching run in docker with command: {sanitized_cmd_str}")
         run = _run_entry_point(command_str, launch_project.project_dir)
         if synchronous:
             run.wait()
@@ -169,7 +172,7 @@ def get_docker_command(
     image: str,
     env_vars: Dict[str, str],
     entry_cmd: List[str],
-    docker_args: Optional[Dict[str, Any]] = None,
+    docker_args: Dict[str, Any] = None,
 ) -> List[str]:
     """Constructs the docker command using the image and docker args.
 

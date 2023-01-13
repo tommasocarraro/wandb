@@ -3,8 +3,8 @@ import random
 from typing import NamedTuple
 
 import kfp
-import kfp.dsl as dsl
 from kfp import components
+import kfp.dsl as dsl
 from kubernetes.client.models import V1EnvVar
 from wandb.integration.kfp import wandb_log
 from wandb_probe import wandb_probe_package

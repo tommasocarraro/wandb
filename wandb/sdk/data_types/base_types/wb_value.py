@@ -1,5 +1,6 @@
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
+from typing import Any, ClassVar, Dict, List, Optional, Type, TYPE_CHECKING, Union
 
+from pkg_resources import parse_version
 from wandb import util
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -12,8 +13,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def _server_accepts_client_ids() -> bool:
-    from pkg_resources import parse_version
-
     # First, if we are offline, assume the backend server cannot
     # accept client IDs. Unfortunately, this is the best we can do
     # until we are sure that all local versions are > "0.11.0" max_cli_version.
@@ -31,8 +30,7 @@ def _server_accepts_client_ids() -> bool:
     max_cli_version = util._get_max_cli_version()
     if max_cli_version is None:
         return False
-    accepts_client_ids: bool = parse_version("0.11.0") <= parse_version(max_cli_version)
-    return accepts_client_ids
+    return parse_version("0.11.0") <= parse_version(max_cli_version)
 
 
 class _WBValueArtifactSource:
@@ -124,7 +122,7 @@ class WBValue:
     @staticmethod
     def init_from_json(
         json_obj: dict, source_artifact: "PublicArtifact"
-    ) -> Optional["WBValue"]:
+    ) -> "Optional[WBValue]":
         """Looks through all subclasses and tries to match the json obj with the class which created it. It will then
         call that subclass' `from_json` method. Importantly, this function will set the return object's `source_artifact`
         attribute to the passed in source artifact. This is critical for artifact bookkeeping. If you choose to create

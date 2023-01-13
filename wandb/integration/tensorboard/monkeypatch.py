@@ -8,6 +8,7 @@ from typing import Any, Optional
 import wandb
 import wandb.util
 
+
 TENSORBOARD_C_MODULE = "tensorflow.python.ops.gen_summary_ops"
 TENSORBOARD_X_MODULE = "tensorboardX.writer"
 TENSORFLOW_PY_MODULE = "tensorflow.python.summary.writer.writer"

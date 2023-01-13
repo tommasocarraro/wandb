@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
 import os
-import pathlib
 
-import wandb
 from pl_base import BoringModel, RandomDataset
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
+import wandb
 
 
 def main():
@@ -31,17 +30,13 @@ def main():
     # set up wandb
     config = dict(some_hparam="Logged Before Trainer starts DDP")
     wandb_logger = WandbLogger(
-        log_model=True,
-        config=config,
-        save_code=True,
-        name=pathlib.Path(__file__).stem,
+        log_model=True, config=config, save_code=True, name=__file__
     )
 
     # Initialize a trainer
     trainer = Trainer(
         max_epochs=2,
-        devices=2,
-        accelerator="gpu",
+        gpus=2,
         strategy="ddp",
         logger=wandb_logger,
     )

@@ -8,6 +8,6 @@ Use the `wandb_callback` to add `wandb` logging to any `XGboost` model. However,
 WandbCallback. Use it instead for more features.
 """
 
-from .xgboost import WandbCallback, wandb_callback
+from .xgboost import wandb_callback, WandbCallback
 
 __all__ = ["wandb_callback", "WandbCallback"]

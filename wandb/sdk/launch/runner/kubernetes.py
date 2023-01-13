@@ -8,21 +8,19 @@ from kubernetes.client.api.batch_v1_api import BatchV1Api  # type: ignore
 from kubernetes.client.api.core_v1_api import CoreV1Api  # type: ignore
 from kubernetes.client.models.v1_job import V1Job  # type: ignore
 from kubernetes.client.models.v1_secret import V1Secret  # type: ignore
-
 import wandb
 from wandb.errors import LaunchError
 from wandb.sdk.launch.builder.abstract import AbstractBuilder
 from wandb.util import get_module, load_json_yaml_dict
 
-from .._project_spec import LaunchProject, get_entry_point_command
+from .abstract import AbstractRun, AbstractRunner, Status
+from .._project_spec import get_entry_point_command, LaunchProject
 from ..builder.build import get_env_vars_dict
 from ..utils import (
-    LOG_PREFIX,
+    get_kube_context_and_api_client,
     PROJECT_DOCKER_ARGS,
     PROJECT_SYNCHRONOUS,
-    get_kube_context_and_api_client,
 )
-from .abstract import AbstractRun, AbstractRunner, Status
 
 TIMEOUT = 5
 MAX_KUBERNETES_RETRIES = (
@@ -63,7 +61,7 @@ class KubernetesSubmittedRun(AbstractRun):
     def wait(self) -> bool:
         while True:
             status = self.get_status()
-            wandb.termlog(f"{LOG_PREFIX}Job {self.name} status: {status}")
+            wandb.termlog(f"Job {self.name} status: {status}")
             if status.state != "running":
                 break
             time.sleep(5)
@@ -83,7 +81,9 @@ class KubernetesSubmittedRun(AbstractRun):
         except Exception as e:
             if self._fail_count == 1:
                 wandb.termlog(
-                    f"{LOG_PREFIX}Failed to get pod status for job: {self.name}. Will wait up to 10 minutes for job to start."
+                    "Failed to get pod status for job: {}. Will wait up to 10 minutes for job to start.".format(
+                        self.name
+                    )
                 )
             self._fail_count += 1
             if self._fail_count > MAX_KUBERNETES_RETRIES:
@@ -165,17 +165,8 @@ class KubernetesRunner(AbstractRunner):
             pod_spec["preemptionPolicy"] = resource_args.get("preemption_policy")
         if resource_args.get("node_name"):
             pod_spec["nodeName"] = resource_args.get("node_name")
-        if resource_args.get("node_selector"):
-            pod_spec["nodeSelector"] = resource_args.get("node_selector")
-        if resource_args.get("tolerations"):
-            pod_spec["tolerations"] = resource_args.get("tolerations")
-        if resource_args.get("security_context"):
-            pod_spec["securityContext"] = resource_args.get("security_context")
-        if resource_args.get("volumes") is not None:
-            vols = resource_args.get("volumes")
-            if not isinstance(vols, list):
-                raise LaunchError("volumes must be a list of volume specifications")
-            pod_spec["volumes"] = vols
+        if resource_args.get("node_selectors"):
+            pod_spec["nodeSelectors"] = resource_args.get("node_selectors")
 
     def populate_container_resources(
         self, containers: List[Dict[str, Any]], resource_args: Dict[str, Any]
@@ -203,13 +194,6 @@ class KubernetesRunner(AbstractRunner):
                     cont.get("resources") != container_resources
                 )  # if multiple containers and we changed something
                 cont["resources"] = container_resources
-            if resource_args.get("volume_mounts") is not None:
-                vol_mounts = resource_args.get("volume_mounts")
-                if not isinstance(vol_mounts, list):
-                    raise LaunchError(
-                        "volume mounts must be a list of volume mount specifications"
-                    )
-                cont["volumeMounts"] = vol_mounts
             cont["security_context"] = {
                 "allowPrivilegeEscalation": False,
                 "capabilities": {"drop": ["ALL"]},
@@ -217,7 +201,7 @@ class KubernetesRunner(AbstractRunner):
             }
         if multi_container_override:
             wandb.termwarn(
-                "{LOG_PREFIX}Container overrides (e.g. resource limits) were provided with multiple containers specified: overrides will be applied to all containers."
+                "Container overrides (e.g. resource limits) were provided with multiple containers specified: overrides will be applied to all containers."
             )
 
     def wait_job_launch(
@@ -243,16 +227,11 @@ class KubernetesRunner(AbstractRunner):
 
         pod_names = [pi.metadata.name for pi in pods.items]
         wandb.termlog(
-            f"{LOG_PREFIX}Job {job_name} created on pod(s) {', '.join(pod_names)}. See logs with e.g. `kubectl logs {pod_names[0]} -n {namespace}`."
+            "Job {job} created on pod(s) {pod_names}. See logs with e.g. `kubectl logs {first_pod}`.".format(
+                job=job_name, pod_names=", ".join(pod_names), first_pod=pod_names[0]
+            )
         )
         return pod_names
-
-    def get_namespace(
-        self, resource_args: Dict[str, Any]
-    ) -> Optional[str]:  # noqa: C901
-        return self.backend_config.get("runner", {}).get(
-            "namespace"
-        ) or resource_args.get("namespace")
 
     def run(
         self,
@@ -267,7 +246,7 @@ class KubernetesRunner(AbstractRunner):
         resource_args = launch_project.resource_args.get("kubernetes", {})
         if not resource_args:
             wandb.termlog(
-                f"{LOG_PREFIX}Note: no resource args specified. Add a Kubernetes yaml spec or other options in a json file with --resource-args <json>."
+                "Note: no resource args specified. Add a Kubernetes yaml spec or other options in a json file with --resource-args <json>."
             )
         context, api_client = get_kube_context_and_api_client(kubernetes, resource_args)
 
@@ -293,17 +272,18 @@ class KubernetesRunner(AbstractRunner):
         # begin pulling resource arg overrides. all of these are optional
 
         # allow top-level namespace override, otherwise take namespace specified at the job level, or default in current context
-        default_namespace = (
+        default = (
             context["context"].get("namespace", "default") if context else "default"
         )
-        namespace = self.get_namespace(resource_args) or default_namespace
+        namespace = resource_args.get(
+            "namespace",
+            job_metadata.get("namespace", default),
+        )
 
         # name precedence: resource args override > name in spec file > generated name
         job_metadata["name"] = resource_args.get("job_name", job_metadata.get("name"))
         if not job_metadata.get("name"):
-            job_metadata[
-                "generateName"
-            ] = f"launch-{launch_project.target_entity}-{launch_project.target_project}-"
+            job_metadata["generateName"] = "launch-"
 
         if resource_args.get("job_labels"):
             job_metadata["labels"] = resource_args.get("job_labels")
@@ -317,13 +297,13 @@ class KubernetesRunner(AbstractRunner):
         entry_point = launch_project.get_single_entry_point()
 
         # env vars
-        env_vars = get_env_vars_dict(launch_project, self._api)
+        env_vars = get_env_vars_dict(launch_project, entry_point, self._api)
 
         docker_args: Dict[str, Any] = self.backend_config[PROJECT_DOCKER_ARGS]
         secret = None
         if docker_args and list(docker_args) != ["docker_image"]:
             wandb.termwarn(
-                f"{LOG_PREFIX}Docker args are not supported for Kubernetes. Not using docker args"
+                "Docker args are not supported for Kubernetes. Not using docker args"
             )
         # only need to do this if user is providing image, on build, our image sets an entrypoint
         entry_cmd = get_entry_point_command(entry_point, launch_project.override_args)
@@ -359,7 +339,7 @@ class KubernetesRunner(AbstractRunner):
             if repository is None:
                 # allow local registry usage for eg local clusters but throw a warning
                 wandb.termwarn(
-                    f"{LOG_PREFIX}Warning: No Docker repository specified. Image will be hosted on local registry, which may not be accessible to your training cluster."
+                    "Warning: No Docker repository specified. Image will be hosted on local registry, which may not be accessible to your training cluster."
                 )
             assert entry_point is not None
             image_uri = builder.build_image(
@@ -374,14 +354,11 @@ class KubernetesRunner(AbstractRunner):
             containers[0]["image"] = image_uri
 
         # reassemble spec
-        given_env_vars = resource_args.get("env", [])
-        kubernetes_style_env_vars = [
-            {"name": k, "value": v} for k, v in env_vars.items()
-        ]
+        given_env_vars = resource_args.get("env", {})
+        merged_env_vars = {**env_vars, **given_env_vars}
         for cont in containers:
-            cont["env"] = given_env_vars + kubernetes_style_env_vars
+            cont["env"] = [{"name": k, "value": v} for k, v in merged_env_vars.items()]
         pod_spec["containers"] = containers
-
         pod_template["spec"] = pod_spec
         pod_template["metadata"] = pod_metadata
         if secret is not None:
@@ -422,10 +399,8 @@ def maybe_create_imagepull_secret(
     namespace: str,
 ) -> Optional["V1Secret"]:
     secret = None
-    ecr_provider = registry_config.get("ecr-provider", "").lower()
     if (
-        ecr_provider
-        and ecr_provider == "aws"
+        registry_config.get("ecr-provider") == "AWS"
         and registry_config.get("url") is not None
         and registry_config.get("credentials") is not None
     ):
@@ -467,7 +442,14 @@ def maybe_create_imagepull_secret(
             core_api.create_namespaced_secret(namespace, secret)
         except Exception as e:
             raise LaunchError(f"Exception when creating Kubernetes secret: {str(e)}\n")
-    # TODO: support other ecr providers
-    elif ecr_provider and ecr_provider != "aws":
-        raise LaunchError(f"Registry provider not supported: {ecr_provider}")
+    # TODO: support other ecxr providers
+    elif (
+        registry_config.get("ecr-provider") != "AWS"
+        and registry_config.get("ecr-provider") is not None
+    ):
+        raise LaunchError(
+            "Registry provider not supported: {}".format(
+                registry_config.get("ecr-provider")
+            )
+        )
     return secret

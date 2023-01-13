@@ -3,14 +3,15 @@
 Implement ServiceInterface for grpc transport.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
+from typing import TYPE_CHECKING
 
 import grpc
-
 from wandb.proto import wandb_server_pb2 as spb
 from wandb.proto import wandb_server_pb2_grpc as pbgrpc
 
-from .service_base import ServiceInterface, _pbmap_apply_dict
+from .service_base import _pbmap_apply_dict
+from .service_base import ServiceInterface
 
 if TYPE_CHECKING:
     from wandb.sdk.wandb_settings import Settings
@@ -53,7 +54,7 @@ class ServiceGrpcInterface(ServiceInterface):
         assert self._stub
         _ = self._stub.ServerInformStart(inform_start)
 
-    def _svc_inform_finish(self, run_id: Optional[str] = None) -> None:
+    def _svc_inform_finish(self, run_id: str = None) -> None:
         assert run_id
         inform_finish = spb.ServerInformFinishRequest()
         inform_finish._info.stream_id = run_id
@@ -66,7 +67,7 @@ class ServiceGrpcInterface(ServiceInterface):
 
         inform_attach = spb.ServerInformAttachRequest()
         inform_attach._info.stream_id = attach_id
-        return self._stub.ServerInformAttach(inform_attach)  # type: ignore
+        return self._stub.ServerInformAttach(inform_attach)
 
     def _svc_inform_teardown(self, exit_code: int) -> None:
         inform_teardown = spb.ServerInformTeardownRequest(exit_code=exit_code)

@@ -6,6 +6,7 @@ from sklearn import metrics
 from sklearn.utils.multiclass import unique_labels
 
 import wandb
+
 from wandb.sklearn import utils
 
 # ignore all future warnings

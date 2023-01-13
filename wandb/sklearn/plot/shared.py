@@ -4,7 +4,9 @@ from warnings import simplefilter
 import numpy as np
 
 import wandb
-from wandb.sklearn import calculate, utils
+
+from wandb.sklearn import calculate
+from wandb.sklearn import utils
 
 # ignore all future warnings
 simplefilter(action="ignore", category=FutureWarning)

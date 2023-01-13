@@ -5,6 +5,7 @@ import pytest
 import wandb
 import wandb.errors
 
+
 if __name__ == "__main__":
     # api_key starts with "local", but base_url points to cloud
     with pytest.raises(wandb.errors.UsageError) as e:

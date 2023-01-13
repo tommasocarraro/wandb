@@ -5,7 +5,10 @@ import pandas as pd
 import sklearn
 
 import wandb
-from wandb.sklearn import calculate, utils
+
+from wandb.sklearn import utils
+from wandb.sklearn import calculate
+
 
 # ignore all future warnings
 simplefilter(action="ignore", category=FutureWarning)

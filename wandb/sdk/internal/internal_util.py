@@ -10,16 +10,18 @@ import queue
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Optional, Tuple, Type, Union
+from typing import TYPE_CHECKING
+
 
 from ..lib import tracelog
 
+
 if TYPE_CHECKING:
+    from typing import Tuple, Type, Optional, Union
     from queue import Queue
+    from wandb.proto.wandb_internal_pb2 import Record, Result
     from threading import Event
     from types import TracebackType
-
-    from wandb.proto.wandb_internal_pb2 import Record, Result
 
     ExceptionType = Union[
         Tuple[Type[BaseException], BaseException, TracebackType],
@@ -34,7 +36,7 @@ class ExceptionThread(threading.Thread):
     """Class to catch exceptions when running a thread."""
 
     __stopped: "Event"
-    __exception: Optional["ExceptionType"]
+    __exception: "Optional[ExceptionType]"
 
     def __init__(self, stopped: "Event") -> None:
         threading.Thread.__init__(self)
@@ -53,7 +55,7 @@ class ExceptionThread(threading.Thread):
             if self.__exception and self.__stopped:
                 self.__stopped.set()
 
-    def get_exception(self) -> Optional["ExceptionType"]:
+    def get_exception(self) -> "Optional[ExceptionType]":
         return self.__exception
 
 

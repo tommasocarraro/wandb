@@ -1,15 +1,14 @@
+from filecmp import dircmp
 import os
 import sys
 import time
-from filecmp import dircmp
 
 import wandb
-from wandb.sdk.lib import runid
 
 # These should have bucket versioning enabled
 GCS_BUCKET = "gs://wandb-experiments"
 S3_BUCKET = "s3://kubeml"
-PREFIX = runid.generate_id()
+PREFIX = wandb.util.generate_id()
 GCS_NAME = f"gcs-artifact-{PREFIX}"
 S3_NAME = f"s3-artifact-{PREFIX}"
 GCS_REMOTE = f"{GCS_BUCKET}/artifact-versions/{PREFIX}"

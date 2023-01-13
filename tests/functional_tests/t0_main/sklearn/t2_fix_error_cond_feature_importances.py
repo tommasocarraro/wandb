@@ -11,7 +11,7 @@ plugin:
   - wandb
 depend:
   requirements:
-    - scikit-learn
+    - sklearn
     - numpy
 assert:
   - :wandb:runs_len: 1
@@ -29,8 +29,8 @@ assert:
 """
 
 import numpy as np
-import wandb
 from sklearn.linear_model import LogisticRegression
+import wandb
 
 run = wandb.init()
 

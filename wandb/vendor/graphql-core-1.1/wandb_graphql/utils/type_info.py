@@ -1,3 +1,5 @@
+import six
+
 from ..language import visitor_meta
 from ..type.definition import (GraphQLInputObjectType, GraphQLList,
                                get_named_type, get_nullable_type,
@@ -12,7 +14,8 @@ def pop(lst):
 
 
 # noinspection PyPep8Naming
-class TypeInfo(metaclass=visitor_meta.VisitorMeta):
+@six.add_metaclass(visitor_meta.VisitorMeta)
+class TypeInfo(object):
     __slots__ = '_schema', '_type_stack', '_parent_type_stack', '_input_type_stack', '_field_def_stack', '_directive', \
                 '_argument', '_get_field_def_fn'
 

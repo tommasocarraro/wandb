@@ -1,10 +1,9 @@
 import io
 import os
 import pathlib
-from typing import TYPE_CHECKING, Optional, Sequence, Type, Union
+from typing import Optional, Sequence, Type, TYPE_CHECKING, Union
 
 from wandb import util
-from wandb.sdk.lib import runid
 
 from ._private import MEDIA_TMP
 from .base_types.media import BatchableMedia, Media
@@ -58,12 +57,12 @@ class Molecule(BatchableMedia):
 
         if hasattr(data_or_path, "name"):
             # if the file has a path, we just detect the type and copy it from there
-            data_or_path = data_or_path.name
+            data_or_path = data_or_path.name  # type: ignore
 
         if hasattr(data_or_path, "read"):
             if hasattr(data_or_path, "seek"):
-                data_or_path.seek(0)
-            molecule = data_or_path.read()
+                data_or_path.seek(0)  # type: ignore
+            molecule = data_or_path.read()  # type: ignore
 
             extension = kwargs.pop("file_type", None)
             if extension is None:
@@ -77,7 +76,7 @@ class Molecule(BatchableMedia):
                 )
 
             tmp_path = os.path.join(
-                MEDIA_TMP.name, runid.generate_id() + "." + extension
+                MEDIA_TMP.name, util.generate_id() + "." + extension
             )
             with open(tmp_path, "w") as f:
                 f.write(molecule)

@@ -1,19 +1,18 @@
 import configparser
+from datetime import datetime
+from distutils.util import strtobool
 import enum
+from functools import reduce
 import getpass
 import json
 import multiprocessing
 import os
 import platform
 import re
-import shutil
 import socket
 import sys
 import tempfile
 import time
-from datetime import datetime
-from distutils.util import strtobool
-from functools import reduce
 from typing import (
     Any,
     Callable,
@@ -22,21 +21,19 @@ from typing import (
     ItemsView,
     Iterable,
     Mapping,
+    no_type_check,
     Optional,
     Sequence,
     Set,
     Tuple,
     Union,
-    no_type_check,
 )
 from urllib.parse import quote, urlencode, urlparse, urlsplit
 
 import wandb
-import wandb.env
 from wandb import util
 from wandb.apis.internal import Api
 from wandb.errors import UsageError
-from wandb.sdk.lib import filesystem
 from wandb.sdk.wandb_config import Config
 from wandb.sdk.wandb_setup import _EarlyLogger
 
@@ -124,7 +121,7 @@ def _get_program() -> Optional[Any]:
     if program is not None:
         return program
     try:
-        import __main__
+        import __main__  # type: ignore
 
         if __main__.__spec__ is None:
             return __main__.__file__
@@ -181,8 +178,6 @@ class SettingsConsole(enum.IntEnum):
     OFF = 0
     WRAP = 1
     REDIRECT = 2
-    WRAP_RAW = 3
-    WRAP_EMU = 4
 
 
 class Property:
@@ -373,8 +368,6 @@ class Settings:
     _disable_viewer: bool  # Prevent early viewer query
     _except_exit: bool
     _executable: str
-    _flow_control_custom: bool
-    _flow_control_disabled: bool
     _internal_check_process: Union[int, float]
     _internal_queue_timeout: Union[int, float]
     _jupyter: bool
@@ -384,11 +377,8 @@ class Settings:
     _kaggle: bool
     _live_policy_rate_limit: int
     _live_policy_wait_time: int
-    _log_level: int
-    _network_buffer: int
     _noop: bool
     _offline: bool
-    _sync: bool
     _os: str
     _platform: str
     _python: str
@@ -396,14 +386,11 @@ class Settings:
     _runqueue_item_id: str
     _save_requirements: bool
     _service_transport: str
-    _service_wait: int
     _start_datetime: datetime
     _start_time: float
     _stats_pid: int  # (internal) base pid for system stats
     _stats_sample_rate_seconds: float
     _stats_samples_to_average: int
-    _stats_join_assets: bool  # join metrics from different assets before sending to backend
-    _stats_neuron_monitor_config_path: str  # path to place config file for neuron-monitor (AWS Trainium)
     _tmp_code_dir: str
     _tracelog: str
     _unsaved_keys: Sequence[str]
@@ -412,28 +399,23 @@ class Settings:
     anonymous: str
     api_key: str
     base_url: str  # The base url for the wandb api
-    cache_dir: str  # The directory to use for artifacts cache: <cache_dir>/artifacts
     code_dir: str
     config_paths: Sequence[str]
     console: str
     deployment: str
     disable_code: bool
     disable_git: bool
-    disable_hints: bool
     disabled: bool  # Alias for mode=dryrun, not supported yet
     docker: str
     email: str
     entity: str
     files_dir: str
     force: bool
-    git_commit: str
     git_remote: str
-    git_remote_url: str
-    git_root: str
     heartbeat_seconds: int
     host: str
     ignore_globs: Tuple[str]
-    init_timeout: float
+    init_timeout: int
     is_local: bool
     label_disable: bool
     launch: bool
@@ -480,7 +462,6 @@ class Settings:
     start_method: str
     strict: bool
     summary_errors: int
-    summary_timeout: int
     summary_warnings: int
     sweep_id: str
     sweep_param_path: str
@@ -507,7 +488,6 @@ class Settings:
             _disable_meta={"preprocessor": _str_as_bool},
             _disable_stats={"preprocessor": _str_as_bool},
             _disable_viewer={"preprocessor": _str_as_bool},
-            _network_buffer={"preprocessor": int},
             _colab={
                 "hook": lambda _: "google.colab" in sys.modules,
                 "auto_hook": True,
@@ -529,24 +509,10 @@ class Settings:
                 ),
                 "auto_hook": True,
             },
-            _flow_control_disabled={
-                "hook": lambda _: self._network_buffer == 0,
-                "auto_hook": True,
-            },
-            _flow_control_custom={
-                "hook": lambda _: bool(self._network_buffer),
-                "auto_hook": True,
-            },
-            _sync={"value": False},
             _platform={"value": util.get_platform_name()},
             _save_requirements={"value": True, "preprocessor": _str_as_bool},
-            _service_wait={"value": 30, "preprocessor": int},
-            _stats_sample_rate_seconds={"value": 2.0, "preprocessor": float},
+            _stats_sample_rate_seconds={"value": 2.0},
             _stats_samples_to_average={"value": 15},
-            _stats_join_assets={"value": True, "preprocessor": _str_as_bool},
-            _stats_neuron_monitor_config_path={
-                "hook": lambda x: self._path_convert(x),
-            },
             _tmp_code_dir={
                 "value": "code",
                 "hook": lambda x: self._path_convert(self.tmp_dir, x),
@@ -568,7 +534,6 @@ class Settings:
                 "auto_hook": True,
             },
             disable_code={"preprocessor": _str_as_bool},
-            disable_hints={"preprocessor": _str_as_bool},
             disable_git={"preprocessor": _str_as_bool},
             disabled={"value": False, "preprocessor": _str_as_bool},
             files_dir={
@@ -584,7 +549,7 @@ class Settings:
                 "value": tuple(),
                 "preprocessor": lambda x: tuple(x) if not isinstance(x, tuple) else x,
             },
-            init_timeout={"value": 60, "preprocessor": lambda x: float(x)},
+            init_timeout={"value": 30, "preprocessor": lambda x: int(x)},
             is_local={
                 "hook": (
                     lambda _: self.base_url != "https://api.wandb.ai"
@@ -630,10 +595,6 @@ class Settings:
                 "hook": lambda x: self._path_convert(self.wandb_dir, x),
             },
             resumed={"value": "False", "preprocessor": _str_as_bool},
-            root_dir={
-                "preprocessor": lambda x: str(x),
-                "value": os.path.abspath(os.getcwd()),
-            },
             run_mode={
                 "hook": lambda _: "offline-run" if self._offline else "run",
                 "auto_hook": True,
@@ -660,7 +621,6 @@ class Settings:
             silent={"value": "False", "preprocessor": _str_as_bool},
             start_method={"validator": self._validate_start_method},
             strict={"preprocessor": _str_as_bool},
-            summary_timeout={"value": 60, "preprocessor": lambda x: int(x)},
             summary_warnings={
                 "value": 5,
                 "preprocessor": lambda x: int(x),
@@ -781,18 +741,8 @@ class Settings:
     @staticmethod
     def _validate_console(value: str) -> bool:
         # choices = {"auto", "redirect", "off", "file", "iowrap", "notebook"}
-        choices: Set[str] = {
-            "auto",
-            "redirect",
-            "off",
-            "wrap",
-            # internal console states
-            "wrap_emu",
-            "wrap_raw",
-        }
+        choices: Set[str] = {"auto", "redirect", "off", "wrap"}
         if value not in choices:
-            # do not advertise internal console states
-            choices -= {"wrap_emu", "wrap_raw"}
             raise UsageError(f"Settings field `console`: '{value}' not in {choices}")
         return True
 
@@ -938,8 +888,6 @@ class Settings:
         convert_dict: Dict[str, SettingsConsole] = dict(
             off=SettingsConsole.OFF,
             wrap=SettingsConsole.WRAP,
-            wrap_raw=SettingsConsole.WRAP_RAW,
-            wrap_emu=SettingsConsole.WRAP_EMU,
             redirect=SettingsConsole.REDIRECT,
         )
         console: str = str(self.console)
@@ -1029,7 +977,7 @@ class Settings:
         self.__unexpected_args: Set[str] = set()
 
         # Set default settings values
-        # We start off with the class attributes and `default_props` dicts
+        # We start off with the class attributes and `default_props`' dicts
         # and then create Property objects.
         # Once initialized, attributes are to only be updated using the `update` method
         default_props = self._default_props()
@@ -1102,6 +1050,10 @@ class Settings:
         # setup private attributes
         object.__setattr__(self, "_Settings_start_datetime", None)
         object.__setattr__(self, "_Settings_start_time", None)
+
+        if os.environ.get(wandb.env.DIR) is None:
+            # todo: double-check source, shouldn't it be Source.ENV?
+            self.update({"root_dir": os.path.abspath(os.getcwd())}, source=Source.BASE)
 
         # done with init, use self.update() to update attributes from now on
         self.__initialized = True
@@ -1242,7 +1194,7 @@ class Settings:
     def items(self) -> ItemsView[str, Any]:
         return self.make_static().items()
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         return self.make_static().get(key, default)
 
     def freeze(self) -> None:
@@ -1365,7 +1317,7 @@ class Settings:
     ) -> None:
         """Modify settings based on environment (for runs and cli)."""
 
-        settings: Dict[str, Union[bool, str, Sequence, None]] = dict()
+        settings: Dict[str, Union[bool, str, Sequence]] = dict()
         # disable symlinks if on windows (requires admin or developer setup)
         settings["symlink"] = True
         if self._windows:
@@ -1417,14 +1369,7 @@ class Settings:
                 # chroot jails or docker containers. Return user id in these cases.
                 settings["username"] = str(os.getuid())
 
-        _executable = (
-            os.environ.get(wandb.env._EXECUTABLE, self._executable)
-            or sys.executable
-            or shutil.which("python")
-        )
-        if _executable is None or _executable == "":
-            _executable = "python3"
-        settings["_executable"] = _executable
+        settings["_executable"] = sys.executable
 
         settings["docker"] = wandb.env.get_docker(wandb.util.image_id_from_k8s())
 
@@ -1527,7 +1472,6 @@ class Settings:
                         init_settings["run_id"] = init_settings["resume"]
                     init_settings["resume"] = "allow"
             elif init_settings["resume"] is True:
-                # todo: add deprecation warning, switch to literal strings for resume
                 init_settings["resume"] = "auto"
 
         # update settings
@@ -1549,7 +1493,7 @@ class Settings:
         # persist our run id in case of failure
         # check None for mypy
         if self.resume == "auto" and self.resume_fname is not None:
-            filesystem.mkdir_exists_ok(self.wandb_dir)
+            wandb.util.mkdir_exists_ok(self.wandb_dir)
             with open(self.resume_fname, "w") as f:
                 f.write(json.dumps({"run_id": self.run_id}))
 
@@ -1580,8 +1524,7 @@ class Settings:
             "sweep_id": "sweep_id",
             "host": "host",
             "resumed": "resumed",
-            "git.remote_url": "git_remote_url",
-            "git.commit": "git_commit",
+            "git.remote_url": "git_remote",
         }
         run_settings = {
             name: reduce(lambda d, k: d.get(k, {}), attr.split("."), run_start_settings)

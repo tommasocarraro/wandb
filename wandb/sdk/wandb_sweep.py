@@ -1,5 +1,5 @@
-import urllib.parse
 from typing import Callable, Dict, Optional, Union
+import urllib.parse
 
 import wandb
 from wandb import env
@@ -30,8 +30,8 @@ def _get_sweep_url(api, sweep_id):
 
 def sweep(
     sweep: Union[dict, Callable],
-    entity: Optional[str] = None,
-    project: Optional[str] = None,
+    entity: str = None,
+    project: str = None,
 ) -> str:
     """Initialize a hyperparameter sweep.
 
@@ -95,11 +95,6 @@ def sweep(
     if callable(sweep):
         sweep = sweep()
     """Sweep create for controller api and jupyter (eventually for cli)."""
-
-    # Project may be only found in the sweep config.
-    if project is None and isinstance(sweep, dict):
-        project = sweep.get("project", None)
-
     if entity:
         env.set_entity(entity)
     if project:

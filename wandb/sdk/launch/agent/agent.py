@@ -6,21 +6,18 @@ import logging
 import os
 import pprint
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import wandb
-import wandb.util as util
 from wandb.apis.internal import Api
 from wandb.sdk.launch.runner.local_container import LocalSubmittedRun
-from wandb.sdk.lib import runid
+import wandb.util as util
 
 from .._project_spec import create_project_from_spec, fetch_and_validate_project
 from ..builder.loader import load_builder
 from ..runner.abstract import AbstractRun
 from ..runner.loader import load_backend
 from ..utils import (
-    LAUNCH_DEFAULT_PROJECT,
-    LOG_PREFIX,
     PROJECT_DOCKER_ARGS,
     PROJECT_SYNCHRONOUS,
     resolve_build_and_registry_config,
@@ -56,14 +53,13 @@ class LaunchAgent:
         self._ticks = 0
         self._running = 0
         self._cwd = os.getcwd()
-        self._namespace = runid.generate_id()
+        self._namespace = wandb.util.generate_id()
         self._access = _convert_access("project")
-        max_jobs_from_config = int(config.get("max_jobs", 1))
-        if max_jobs_from_config == -1:
+        if config.get("max_jobs") == -1:
             self._max_jobs = float("inf")
         else:
-            self._max_jobs = max_jobs_from_config
-        self.default_config: Dict[str, Any] = config
+            self._max_jobs = config.get("max_jobs") or 1
+        self.default_config: Optional[Dict[str, Any]] = config
 
         # serverside creation
         self.gorilla_supports_agents = (
@@ -100,14 +96,11 @@ class LaunchAgent:
 
     def print_status(self) -> None:
         """Prints the current status of the agent."""
-        if self._project == LAUNCH_DEFAULT_PROJECT:
-            wandb.termlog(
-                f"{LOG_PREFIX}agent {self._name} polling on queues {','.join(self._queues)} for jobs"
+        wandb.termlog(
+            "agent {} polling on project {}, queues {} for jobs".format(
+                self._name, self._project, " ".join(self._queues)
             )
-        else:
-            wandb.termlog(
-                f"{LOG_PREFIX}agent {self._name} polling on project {self._project}, queues {','.join(self._queues)} for jobs"
-            )
+        )
 
     def update_status(self, status: str) -> None:
         update_ret = self._api.update_launch_agent_status(
@@ -133,9 +126,26 @@ class LaunchAgent:
         except Exception:
             self.finish_job_id(job_id)
 
+    def _validate_and_fix_spec_project_entity(
+        self, launch_spec: Dict[str, Any]
+    ) -> None:
+        """Checks if launch spec target project/entity differs from agent. Forces these values to agent's if they are set."""
+        if (
+            launch_spec.get("project") is not None
+            and launch_spec.get("project") != self._project
+        ) or (
+            launch_spec.get("entity") is not None
+            and launch_spec.get("entity") != self._entity
+        ):
+            wandb.termwarn(
+                f"Launch agents only support sending runs to their own project and entity. This run will be sent to {self._entity}/{self._project}"
+            )
+            launch_spec["entity"] = self._entity
+            launch_spec["project"] = self._project
+
     def run_job(self, job: Dict[str, Any]) -> None:
         """Sets up project and runs the job."""
-        _msg = f"{LOG_PREFIX}Launch agent received job:\n{pprint.pformat(job)}\n"
+        _msg = f"Launch agent received job:\n{pprint.pformat(job)}\n"
         wandb.termlog(_msg)
         _logger.info(_msg)
         # update agent status
@@ -150,6 +160,7 @@ class LaunchAgent:
             launch_spec["overrides"]["args"] = util._user_args_to_dict(
                 launch_spec["overrides"].get("args", [])
             )
+        self._validate_and_fix_spec_project_entity(launch_spec)
 
         project = create_project_from_spec(launch_spec, self._api)
         _logger.info("Fetching and validating project...")
@@ -157,8 +168,7 @@ class LaunchAgent:
         _logger.info("Fetching resource...")
         resource = launch_spec.get("resource") or "local-container"
         backend_config: Dict[str, Any] = {
-            PROJECT_DOCKER_ARGS: (launch_spec.get("docker", {}) or {}).get("args", {})
-            or {},
+            PROJECT_DOCKER_ARGS: {},
             PROJECT_SYNCHRONOUS: False,  # agent always runs async
         }
 
@@ -171,10 +181,6 @@ class LaunchAgent:
             self.default_config, override_build_config, override_registry_config
         )
         builder = load_builder(build_config)
-
-        default_runner = self.default_config.get("runner", {}).get("type")
-        if default_runner == resource:
-            backend_config["runner"] = self.default_config.get("runner")
         backend = load_backend(resource, self._api, backend_config)
         backend.verify()
         _logger.info("Backend loaded...")
@@ -185,7 +191,11 @@ class LaunchAgent:
 
     def loop(self) -> None:
         """Main loop function for agent."""
-        self.print_status()
+        wandb.termlog(
+            "launch agent polling project {}/{} on queues: {}".format(
+                self._entity, self._project, ",".join(self._queues)
+            )
+        )
         try:
             while True:
                 self._ticks += 1
@@ -227,5 +237,5 @@ class LaunchAgent:
                 if isinstance(run, LocalSubmittedRun):
                     run.command_proc.kill()
             self.update_status(AGENT_KILLED)
-            wandb.termlog(f"{LOG_PREFIX}Shutting down, active jobs:")
+            wandb.termlog("Shutting down, active jobs:")
             self.print_status()
